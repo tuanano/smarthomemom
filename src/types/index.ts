@@ -5,6 +5,7 @@ export interface FamilyMember {
   age: number;
   gender: 'male' | 'female';
   activityLevel: 'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active';
+  isDefaultSpender?: boolean; // thành viên chi tiêu mặc định
 }
 
 export interface Family {
@@ -20,6 +21,7 @@ export interface Family {
     fat: number;
   };
   defaultWalletId?: string;
+  linkedMemberIds?: { [userId: string]: string }; // userId → memberId
   customCategories?: CustomCategory[];
   customIngredients?: CustomIngredient[];
   favoriteMenus?: FavoriteMenu[];
@@ -33,6 +35,8 @@ export interface Wallet {
   colorCode: string;
   iconName: string;
   createdAt: any;
+  // false = ví lưu trữ: không tính vào tổng số dư, không chi được, chỉ thu/chuyển tiền
+  includeInBalance?: boolean;
 }
 
 export interface Transaction {

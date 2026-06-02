@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import CurrencyInput from '../../components/CurrencyInput';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
@@ -8,6 +9,7 @@ import { Plus, Wallet as WalletIcon, TrendingDown, TrendingUp, AlertTriangle, Tr
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { format } from 'date-fns';
 import TransactionModal from '../budget/TransactionModal';
+import BudgetDetailPage from '../budget/BudgetDetailPage';
 import PullToRefresh from '../../components/PullToRefresh';
 
 export default function DashboardPage() {
@@ -15,10 +17,9 @@ export default function DashboardPage() {
   const confirm = useConfirm();
   const { 
     family, 
-    wallets, 
-    transactions, 
-    budgets, 
-    createWallet, 
+    wallets,
+    transactions,
+    budgets,
     deleteTransaction,
     saveBudget,
     customCategories
@@ -26,42 +27,23 @@ export default function DashboardPage() {
 
   const mergedCategories = getMergedCategories(customCategories);
 
+  const linkedMember = user && family
+    ? family.members.find(m => m.id === family.linkedMemberIds?.[user.uid])
+    : null;
+  const greetingName = linkedMember?.name ?? 'bạn';
+
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [newBudgetCategory, setNewBudgetCategory] = useState('Đi chợ / Ăn uống');
   const [newBudgetLimit, setNewBudgetLimit] = useState(5000000);
   const [showAddBudget, setShowAddBudget] = useState(false);
-  const [view, setView] = useState<'main' | 'history' | 'wallet_detail'>('main');
+  const [view, setView] = useState<'main' | 'history' | 'wallet_detail' | 'budget_detail'>('main');
   const [selectedWalletIdForDetail, setSelectedWalletIdForDetail] = useState<string | null>(null);
+  const [selectedBudgetForDetail, setSelectedBudgetForDetail] = useState<typeof budgets[0] | null>(null);
   const [walletPeriod, setWalletPeriod] = useState<30 | 90 | 365>(30);
 
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
-
-  // Initialize trial wallets if empty
-  useEffect(() => {
-    if (user && wallets.length === 0) {
-      const initWallets = async () => {
-        await createWallet(user.uid, {
-          walletId: 'cash_wallet',
-          name: 'Tiền mặt (Ví tay)',
-          type: 'cash',
-          balance: 3000000,
-          colorCode: '#FF8C69',
-          iconName: 'Coins'
-        });
-        await createWallet(user.uid, {
-          walletId: 'bank_wallet',
-          name: 'Techcombank (Thẻ)',
-          type: 'bank',
-          balance: 12000000,
-          colorCode: '#4EA8DE',
-          iconName: 'CreditCard'
-        });
-      };
-      initWallets();
-    }
-  }, [user, wallets]);
 
   // Initial dummy budgets if empty
   useEffect(() => {
@@ -83,8 +65,10 @@ export default function DashboardPage() {
     }
   }, [user, budgets]);
 
-  // Calculate totals
-  const totalBalance = wallets.reduce((sum, w) => sum + w.balance, 0);
+  // Calculate totals — chỉ tính ví chi tiêu (includeInBalance !== false)
+  const totalBalance = wallets
+    .filter(w => w.includeInBalance !== false)
+    .reduce((sum, w) => sum + w.balance, 0);
   
   const totalIncome = transactions
     .filter(t => t.type === 'income')
@@ -462,7 +446,7 @@ export default function DashboardPage() {
             {/* Upper header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
               <div>
-                <h2 style={{ fontSize: '20px' }}>Chào Mẹ, {family?.familyName}!</h2>
+                <h2 style={{ fontSize: '20px' }}>Chào {greetingName}, {family?.familyName}!</h2>
                 <p style={{ fontSize: '12px' }}>Hôm nay là {new Date().toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
               </div>
               <button
@@ -542,10 +526,17 @@ export default function DashboardPage() {
                     }}>
                       <PiggyBank size={18} />
                     </div>
-                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>{w.name.split(' ')[0]}</span>
+                    <div>
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>{w.name.split(' ')[0]}</span>
+                      {w.includeInBalance === false && (
+                        <div style={{ fontSize: '9px', color: '#71717a', fontWeight: 600 }}>Lưu trữ</div>
+                      )}
+                    </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Số dư</div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                      {w.includeInBalance === false ? 'Tiết kiệm' : 'Số dư'}
+                    </div>
                     <div style={{ fontSize: '14px', fontWeight: 800 }}>{w.balance.toLocaleString('vi-VN')}đ</div>
                   </div>
                 </div>
@@ -583,11 +574,10 @@ export default function DashboardPage() {
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label>Hạn mức hàng tháng (VND)</label>
-                    <input
-                      type="number"
+                    <CurrencyInput
                       className="form-control"
                       value={newBudgetLimit}
-                      onChange={(e) => setNewBudgetLimit(parseInt(e.target.value) || 0)}
+                      onChange={setNewBudgetLimit}
                     />
                   </div>
                   <button type="button" onClick={handleAddBudget} className="btn btn-primary" style={{ height: '40px' }}>Lưu hạn mức</button>
@@ -602,10 +592,21 @@ export default function DashboardPage() {
                 else if (ratio >= 0.7) color = 'var(--accent)';
 
                 return (
-                  <div key={b.budgetId} className="card" style={{ marginBottom: '10px', padding: '12px 16px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+                  <div
+                    key={b.budgetId}
+                    className="card"
+                    onClick={() => {
+                      setSelectedBudgetForDetail(b);
+                      setView('budget_detail');
+                    }}
+                    style={{ marginBottom: '10px', padding: '12px 16px', cursor: 'pointer' }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
                       <span>{b.category}</span>
-                      <span>{spent.toLocaleString('vi-VN')} / {b.limitAmount.toLocaleString('vi-VN')} đ</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{ color }}>{spent.toLocaleString('vi-VN')} / {b.limitAmount.toLocaleString('vi-VN')} đ</span>
+                        <ChevronRight size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                      </div>
                     </div>
                     <div style={{ height: '8px', backgroundColor: 'var(--bg-grey)', borderRadius: '4px', overflow: 'hidden' }}>
                       <div style={{ height: '100%', width: `${Math.min(ratio * 100, 100)}%`, backgroundColor: color, borderRadius: '4px', transition: 'width 0.3s ease' }}></div>
@@ -761,7 +762,7 @@ export default function DashboardPage() {
               )}
             </div>
           </>
-        ) : (
+        ) : view === 'wallet_detail' ? (
           /* Wallet Details view */
           selectedWallet && (
             <div style={{ paddingBottom: '20px' }}>
@@ -897,6 +898,15 @@ export default function DashboardPage() {
                 )}
               </div>
             </div>
+          )
+        ) : (
+          /* Budget Detail view */
+          selectedBudgetForDetail && (
+            <BudgetDetailPage
+              budget={selectedBudgetForDetail}
+              transactions={transactions}
+              onBack={() => setView('main')}
+            />
           )
         )}
       </PullToRefresh>

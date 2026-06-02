@@ -1,10 +1,11 @@
 import { useState } from 'react';
+import CurrencyInput from '../../components/CurrencyInput';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
 import { getMergedCategories } from '../../core/constants';
 import type { FamilyMember, Wallet, Budget, CustomCategory, CustomIngredient } from '../../types';
-import { Users, PiggyBank, Settings, Coins, CreditCard, Plus, Trash2, Flame, Save, LogOut, Tag, Apple, HelpCircle, ChevronRight, User, ArrowLeft, Calculator } from 'lucide-react';
+import { Users, PiggyBank, Settings, Coins, CreditCard, Plus, Trash2, Flame, Save, LogOut, Tag, Apple, HelpCircle, ChevronRight, User, ArrowLeft, Calculator, Pencil, SlidersHorizontal, Star, UserCheck, Check } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../../firebase';
 
@@ -50,20 +51,31 @@ export default function SettingsPage() {
   const [editFamilyName, setEditFamilyName] = useState(family?.familyName || '');
   const [memberName, setMemberName] = useState('');
   const [memberRole, setMemberRole] = useState<'father' | 'mother' | 'child' | 'grandparent'>('child');
-  const [memberAge, setMemberAge] = useState(6);
+  const [memberAgeStr, setMemberAgeStr] = useState('6');
   const [memberGender, setMemberGender] = useState<'male' | 'female'>('male');
   const [memberActivity, setMemberActivity] = useState<'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active'>('lightly_active');
+
+  // Edit member state
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [editMemberName, setEditMemberName] = useState('');
+  const [editMemberRole, setEditMemberRole] = useState<'father' | 'mother' | 'child' | 'grandparent'>('child');
+  const [editMemberAgeStr, setEditMemberAgeStr] = useState('');
+  const [editMemberGender, setEditMemberGender] = useState<'male' | 'female'>('male');
+  const [editMemberActivity, setEditMemberActivity] = useState<'sedentary' | 'lightly_active' | 'moderately_active' | 'very_active'>('lightly_active');
 
   // --- WALLET STATE ---
   const [showAddWallet, setShowAddWallet] = useState(false);
   const [newWalletName, setNewWalletName] = useState('');
   const [newWalletType, setNewWalletType] = useState<'cash' | 'bank' | 'e_wallet'>('cash');
   const [newWalletBalance, setNewWalletBalance] = useState(1000000);
-  
+  const [newWalletIsDefault, setNewWalletIsDefault] = useState(false);
+  const [newWalletIncludeInBalance, setNewWalletIncludeInBalance] = useState(true);
+
   // Edit wallet states
   const [editingWalletId, setEditingWalletId] = useState<string | null>(null);
   const [editWalletName, setEditWalletName] = useState('');
   const [editWalletBalance, setEditWalletBalance] = useState(0);
+  const [editWalletIncludeInBalance, setEditWalletIncludeInBalance] = useState(true);
 
   // Adjust wallet balance states
   const [adjustingWalletId, setAdjustingWalletId] = useState<string | null>(null);
@@ -133,17 +145,31 @@ export default function SettingsPage() {
 
   const handleAddMember = async () => {
     if (!memberName.trim()) return;
+    const age = parseInt(memberAgeStr) || 1;
     const newMember: FamilyMember = {
       id: Date.now().toString(),
       name: memberName.trim(),
       role: memberRole,
-      age: memberAge,
+      age,
       gender: memberGender,
       activityLevel: memberActivity
     };
     const updated = [...family.members, newMember];
     await recalculateAndSaveFamily(updated);
     setMemberName('');
+    setMemberAgeStr('6');
+  };
+
+  const handleUpdateMember = async () => {
+    if (!editingMemberId || !editMemberName.trim()) return;
+    const age = parseInt(editMemberAgeStr) || 1;
+    const updated = family.members.map(m =>
+      m.id === editingMemberId
+        ? { ...m, name: editMemberName.trim(), role: editMemberRole, age, gender: editMemberGender, activityLevel: editMemberActivity }
+        : m
+    );
+    await recalculateAndSaveFamily(updated);
+    setEditingMemberId(null);
   };
 
   const handleDeleteMember = async (id: string) => {
@@ -163,6 +189,19 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSetDefaultSpender = async (id: string) => {
+    const updated = family.members.map(m => ({ ...m, isDefaultSpender: m.id === id }));
+    await recalculateAndSaveFamily(updated);
+  };
+
+  const handleLinkUserToMember = async (memberId: string) => {
+    if (!user) return;
+    await saveFamily({
+      ...family,
+      linkedMemberIds: { ...(family.linkedMemberIds || {}), [user.uid]: memberId }
+    });
+  };
+
   // --- ACTIONS: WALLETS ---
   const handleCreateWallet = async () => {
     if (!newWalletName.trim()) return;
@@ -173,9 +212,15 @@ export default function SettingsPage() {
       type: newWalletType,
       balance: newWalletBalance,
       colorCode: newWalletType === 'cash' ? '#FF8C69' : newWalletType === 'bank' ? '#4EA8DE' : '#81B29A',
-      iconName: newWalletType === 'cash' ? 'Coins' : newWalletType === 'bank' ? 'CreditCard' : 'PiggyBank'
+      iconName: newWalletType === 'cash' ? 'Coins' : newWalletType === 'bank' ? 'CreditCard' : 'PiggyBank',
+      includeInBalance: newWalletIncludeInBalance
     });
+    if (newWalletIsDefault) {
+      await saveFamily({ ...family, defaultWalletId: walletId });
+    }
     setNewWalletName('');
+    setNewWalletIsDefault(false);
+    setNewWalletIncludeInBalance(true);
     setShowAddWallet(false);
   };
 
@@ -184,7 +229,8 @@ export default function SettingsPage() {
     await createWallet(user.uid, {
       ...w,
       name: editWalletName.trim(),
-      balance: editWalletBalance
+      balance: editWalletBalance,
+      includeInBalance: editWalletIncludeInBalance
     });
     setEditingWalletId(null);
   };
@@ -263,6 +309,14 @@ export default function SettingsPage() {
     } catch {
       return 0;
     }
+  };
+
+  const formatExprDisplay = (expr: string): string => {
+    if (!expr) return '';
+    if (/^[0-9]+$/.test(expr)) {
+      return parseInt(expr, 10).toLocaleString('vi-VN');
+    }
+    return expr;
   };
 
   const handleAdjustKeyPress = (val: string) => {
@@ -576,43 +630,232 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <h3 style={{ fontSize: '16px', margin: '20px 0 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Tài khoản của bạn là ai */}
+          {(() => {
+            const linkedId = family.linkedMemberIds?.[user.uid];
+            const linkedMember = family.members.find(m => m.id === linkedId);
+            return (
+              <div className="card" style={{ marginBottom: '20px', backgroundColor: 'var(--primary-bg)', borderColor: 'var(--primary-light)', borderWidth: '2px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                  <UserCheck size={18} style={{ color: 'var(--primary)' }} />
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>Tài khoản của bạn</div>
+                </div>
+                {linkedMember ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '15px' }}>{linkedMember.name}</div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                        {linkedMember.role === 'father' ? 'Bố' : linkedMember.role === 'mother' ? 'Mẹ' : linkedMember.role === 'grandparent' ? 'Ông/Bà' : 'Con cái'} • {linkedMember.age} tuổi
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => handleLinkUserToMember('')}
+                      style={{ background: 'none', border: 'none', fontSize: '12px', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+                      Đổi
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>Chọn thành viên tương ứng với tài khoản đăng nhập của bạn:</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {family.members.map(m => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => handleLinkUserToMember(m.id)}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)',
+                            backgroundColor: 'var(--bg-card)', cursor: 'pointer', textAlign: 'left'
+                          }}
+                        >
+                          <span style={{ fontWeight: 600, fontSize: '14px' }}>{m.name}</span>
+                          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            {m.role === 'father' ? 'Bố' : m.role === 'mother' ? 'Mẹ' : m.role === 'grandparent' ? 'Ông/Bà' : 'Con cái'}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          <h3 style={{ fontSize: '16px', margin: '0 0 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Users size={18} style={{ color: 'var(--primary)' }} />
             Thành viên gia đình ({family.members.length})
           </h3>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
-            {family.members.map(m => (
-              <div key={m.id} className="card" style={{ margin: 0, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '15px' }}>{m.name}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                    {m.role === 'father' ? 'Bố' : m.role === 'mother' ? 'Mẹ' : m.role === 'grandparent' ? 'Ông/Bà' : 'Con cái'} • {m.age} tuổi • {m.gender === 'male' ? 'Nam' : 'Nữ'}
-                  </div>
+            {family.members.map(m => {
+              const isEditing = editingMemberId === m.id;
+              const isDefaultSpender = !!m.isDefaultSpender;
+              const isLinked = family.linkedMemberIds?.[user.uid] === m.id;
+              const roleLabel = m.role === 'father' ? 'Bố' : m.role === 'mother' ? 'Mẹ' : m.role === 'grandparent' ? 'Ông/Bà' : 'Con cái';
+
+              return (
+                <div key={m.id} className="card" style={{
+                  margin: 0, padding: '14px 16px',
+                  borderColor: isDefaultSpender ? 'var(--secondary)' : 'var(--border)',
+                  borderWidth: isDefaultSpender ? '2px' : '1px'
+                }}>
+                  {isEditing ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div style={{ fontWeight: 700, fontSize: '14px', marginBottom: '2px' }}>Sửa thông tin: {m.name}</div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <div className="form-group" style={{ flex: 2, marginBottom: 0 }}>
+                          <label>Họ tên</label>
+                          <input type="text" className="form-control" value={editMemberName} onChange={e => setEditMemberName(e.target.value)} />
+                        </div>
+                        <div className="form-group" style={{ flex: 1.5, marginBottom: 0 }}>
+                          <label>Vai trò</label>
+                          <select className="form-control" value={editMemberRole} onChange={(e: any) => setEditMemberRole(e.target.value)}>
+                            <option value="child">Con cái</option>
+                            <option value="father">Bố</option>
+                            <option value="mother">Mẹ</option>
+                            <option value="grandparent">Ông/Bà</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <label style={{ fontSize: '11px', fontWeight: 600 }}>Tuổi</label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            className="form-control"
+                            value={editMemberAgeStr}
+                            onChange={e => setEditMemberAgeStr(e.target.value.replace(/\D/g, ''))}
+                            placeholder="1"
+                          />
+                        </div>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <label style={{ fontSize: '11px', fontWeight: 600 }}>Giới tính</label>
+                          <select className="form-control" value={editMemberGender} onChange={(e: any) => setEditMemberGender(e.target.value)}>
+                            <option value="male">Nam</option>
+                            <option value="female">Nữ</option>
+                          </select>
+                        </div>
+                        <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <label style={{ fontSize: '11px', fontWeight: 600 }}>Vận động</label>
+                          <select className="form-control" value={editMemberActivity} onChange={(e: any) => setEditMemberActivity(e.target.value)}>
+                            <option value="sedentary">Ít</option>
+                            <option value="lightly_active">Nhẹ</option>
+                            <option value="moderately_active">Vừa</option>
+                            <option value="very_active">Nhiều</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '2px' }}>
+                        <button type="button" onClick={handleUpdateMember} className="btn btn-primary" style={{ flex: 1, height: '38px', fontSize: '13px' }}>
+                          <Check size={14} /> Lưu
+                        </button>
+                        <button type="button" onClick={() => setEditingMemberId(null)} className="btn btn-secondary" style={{ flex: 1, height: '38px', fontSize: '13px' }}>
+                          Hủy
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Info row */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                        <div style={{
+                          width: '42px', height: '42px', borderRadius: '12px', flexShrink: 0,
+                          backgroundColor: isDefaultSpender ? '#81B29A22' : 'var(--bg-grey)',
+                          color: isDefaultSpender ? 'var(--secondary)' : 'var(--text-secondary)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: '18px', fontWeight: 800
+                        }}>
+                          {m.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700, fontSize: '15px' }}>{m.name}</span>
+                            {isLinked && (
+                              <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '8px', backgroundColor: 'var(--primary-bg)', color: 'var(--primary)', border: '1px solid var(--primary-light)' }}>
+                                Của bạn
+                              </span>
+                            )}
+                            {isDefaultSpender && (
+                              <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '8px', backgroundColor: '#81B29A22', color: 'var(--secondary)', border: '1px solid #81B29A44' }}>
+                                Chi mặc định
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                            {roleLabel} • {m.age} tuổi • {m.gender === 'male' ? 'Nam' : 'Nữ'} • ~{calculateMemberCalories(m)} Kcal
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Action bar */}
+                      <div style={{ display: 'flex', borderRadius: '10px', overflow: 'hidden', border: '1px solid var(--border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingMemberId(m.id);
+                            setEditMemberName(m.name);
+                            setEditMemberRole(m.role);
+                            setEditMemberAgeStr(String(m.age));
+                            setEditMemberGender(m.gender);
+                            setEditMemberActivity(m.activityLevel);
+                          }}
+                          style={{
+                            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            justifyContent: 'center', gap: '3px', padding: '8px 4px',
+                            background: 'none', border: 'none', borderRight: '1px solid var(--border)',
+                            cursor: 'pointer', color: 'var(--primary)'
+                          }}
+                        >
+                          <Pencil size={15} />
+                          <span style={{ fontSize: '10px', fontWeight: 600 }}>Sửa</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => !isDefaultSpender && handleSetDefaultSpender(m.id)}
+                          style={{
+                            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            justifyContent: 'center', gap: '3px', padding: '8px 4px',
+                            background: isDefaultSpender ? '#81B29A15' : 'none',
+                            border: 'none', borderRight: '1px solid var(--border)',
+                            cursor: isDefaultSpender ? 'default' : 'pointer',
+                            color: isDefaultSpender ? 'var(--secondary)' : 'var(--text-secondary)'
+                          }}
+                        >
+                          <Check size={15} />
+                          <span style={{ fontSize: '10px', fontWeight: 600 }}>{isDefaultSpender ? 'Chi mặc định' : 'Đặt mặc định'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteMember(m.id)}
+                          style={{
+                            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            justifyContent: 'center', gap: '3px', padding: '8px 4px',
+                            background: 'none', border: 'none',
+                            cursor: 'pointer', color: 'var(--danger)'
+                          }}
+                        >
+                          <Trash2 size={15} />
+                          <span style={{ fontSize: '10px', fontWeight: 600 }}>Xóa</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--secondary)' }}>
-                    ~{calculateMemberCalories(m)} Kcal
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteMember(m.id)}
-                    style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
+          {/* Form thêm thành viên */}
           <div className="card" style={{ backgroundColor: 'var(--secondary-bg)', borderStyle: 'dashed' }}>
-            <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '12px' }}>Thêm thành viên</h4>
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+            <h4 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '12px' }}>Thêm thành viên mới</h4>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
               <input
                 type="text"
                 className="form-control"
-                placeholder="Tên thành viên"
+                placeholder="Họ tên thành viên"
                 value={memberName}
                 onChange={(e) => setMemberName(e.target.value)}
                 style={{ flex: 2 }}
@@ -629,35 +872,28 @@ export default function SettingsPage() {
                 <option value="grandparent">Ông/Bà</option>
               </select>
             </div>
-
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <label style={{ fontSize: '11px', fontWeight: 600 }}>Tuổi</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   className="form-control"
-                  value={memberAge}
-                  onChange={(e) => setMemberAge(parseInt(e.target.value) || 1)}
+                  value={memberAgeStr}
+                  onChange={(e) => setMemberAgeStr(e.target.value.replace(/\D/g, ''))}
+                  placeholder="6"
                 />
               </div>
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <label style={{ fontSize: '11px', fontWeight: 600 }}>Giới tính</label>
-                <select
-                  className="form-control"
-                  value={memberGender}
-                  onChange={(e: any) => setMemberGender(e.target.value)}
-                >
+                <select className="form-control" value={memberGender} onChange={(e: any) => setMemberGender(e.target.value)}>
                   <option value="male">Nam</option>
                   <option value="female">Nữ</option>
                 </select>
               </div>
               <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <label style={{ fontSize: '11px', fontWeight: 600 }}>Vận động</label>
-                <select
-                  className="form-control"
-                  value={memberActivity}
-                  onChange={(e: any) => setMemberActivity(e.target.value)}
-                >
+                <select className="form-control" value={memberActivity} onChange={(e: any) => setMemberActivity(e.target.value)}>
                   <option value="sedentary">Ít vận động</option>
                   <option value="lightly_active">Nhẹ nhàng</option>
                   <option value="moderately_active">Vừa phải</option>
@@ -665,7 +901,7 @@ export default function SettingsPage() {
                 </select>
               </div>
             </div>
-            <button type="button" onClick={handleAddMember} className="btn btn-secondary" style={{ width: '100%', height: '40px' }}>
+            <button type="button" onClick={handleAddMember} className="btn btn-secondary" style={{ width: '100%', height: '42px' }}>
               <Plus size={16} /> Thêm thành viên
             </button>
           </div>
@@ -725,14 +961,66 @@ export default function SettingsPage() {
                 </div>
                 <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
                   <label>Số dư ban đầu (VND)</label>
-                  <input
-                    type="number"
+                  <CurrencyInput
                     className="form-control"
                     value={newWalletBalance}
-                    onChange={(e) => setNewWalletBalance(parseInt(e.target.value) || 0)}
+                    onChange={setNewWalletBalance}
                   />
                 </div>
               </div>
+              {/* Toggles */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '14px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700 }}>Đặt làm ví mặc định</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Tự động chọn ví này khi thêm giao dịch mới</div>
+                  </div>
+                  <div
+                    onClick={() => setNewWalletIsDefault(v => !v)}
+                    style={{
+                      width: '44px', height: '24px', borderRadius: '12px', flexShrink: 0,
+                      backgroundColor: newWalletIsDefault ? 'var(--primary)' : 'var(--bg-grey)',
+                      position: 'relative', transition: 'background-color 0.2s', cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{
+                      position: 'absolute', top: '3px',
+                      left: newWalletIsDefault ? '23px' : '3px',
+                      width: '18px', height: '18px', borderRadius: '50%',
+                      backgroundColor: 'white', transition: 'left 0.2s',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                    }} />
+                  </div>
+                </label>
+
+                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 700 }}>Ví chi tiêu (tính vào số dư)</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                      {newWalletIncludeInBalance
+                        ? 'Số dư hiển thị ở tổng số dư, có thể chi tiêu bình thường'
+                        : 'Số dư ẩn khỏi tổng, chỉ thu/chuyển tiền — không chi được'}
+                    </div>
+                  </div>
+                  <div
+                    onClick={() => setNewWalletIncludeInBalance(v => !v)}
+                    style={{
+                      width: '44px', height: '24px', borderRadius: '12px', flexShrink: 0,
+                      backgroundColor: newWalletIncludeInBalance ? 'var(--secondary)' : 'var(--bg-grey)',
+                      position: 'relative', transition: 'background-color 0.2s', cursor: 'pointer'
+                    }}
+                  >
+                    <div style={{
+                      position: 'absolute', top: '3px',
+                      left: newWalletIncludeInBalance ? '23px' : '3px',
+                      width: '18px', height: '18px', borderRadius: '50%',
+                      backgroundColor: 'white', transition: 'left 0.2s',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                    }} />
+                  </div>
+                </label>
+              </div>
+
               <button
                 type="button"
                 onClick={handleCreateWallet}
@@ -748,6 +1036,7 @@ export default function SettingsPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
             {wallets.map(w => {
               const isDefault = family.defaultWalletId === w.walletId;
+              const isSpending = w.includeInBalance !== false;
               const isEditing = editingWalletId === w.walletId;
               const isAdjusting = adjustingWalletId === w.walletId;
 
@@ -759,7 +1048,7 @@ export default function SettingsPage() {
                     margin: 0,
                     padding: '16px',
                     borderColor: isDefault ? 'var(--primary)' : 'var(--border)',
-                    backgroundColor: isDefault ? 'var(--primary-bg)' : 'var(--bg-card)',
+                    backgroundColor: 'var(--bg-card)',
                     borderWidth: isDefault ? '2px' : '1px'
                   }}
                 >
@@ -776,13 +1065,36 @@ export default function SettingsPage() {
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
                         <label>Số dư (VND)</label>
-                        <input
-                          type="number"
+                        <CurrencyInput
                           className="form-control"
                           value={editWalletBalance}
-                          onChange={(e) => setEditWalletBalance(parseInt(e.target.value) || 0)}
+                          onChange={setEditWalletBalance}
                         />
                       </div>
+                      <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '8px 0' }}>
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: 700 }}>Ví chi tiêu</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                            {editWalletIncludeInBalance ? 'Tính vào tổng số dư, chi tiêu bình thường' : 'Ẩn khỏi tổng, chỉ thu/chuyển tiền'}
+                          </div>
+                        </div>
+                        <div
+                          onClick={() => setEditWalletIncludeInBalance(v => !v)}
+                          style={{
+                            width: '44px', height: '24px', borderRadius: '12px', flexShrink: 0,
+                            backgroundColor: editWalletIncludeInBalance ? 'var(--secondary)' : 'var(--bg-grey)',
+                            position: 'relative', transition: 'background-color 0.2s', cursor: 'pointer'
+                          }}
+                        >
+                          <div style={{
+                            position: 'absolute', top: '3px',
+                            left: editWalletIncludeInBalance ? '23px' : '3px',
+                            width: '18px', height: '18px', borderRadius: '50%',
+                            backgroundColor: 'white', transition: 'left 0.2s',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                          }} />
+                        </div>
+                      </label>
                       <div style={{ display: 'flex', gap: '8px' }}>
                         <button
                           type="button"
@@ -837,7 +1149,7 @@ export default function SettingsPage() {
                               height: '48px',
                             }}
                           >
-                            <span>{adjustWalletExpr || '0'}</span>
+                            <span>{formatExprDisplay(adjustWalletExpr) || '0'}</span>
                             {showAdjustKeypad && (
                               <span 
                                 className="blinking-cursor" 
@@ -901,74 +1213,106 @@ export default function SettingsPage() {
                       </div>
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <>
+                      {/* Tầng 1: Thông tin ví */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '14px' }}>
                         <div style={{
-                          width: '40px',
-                          height: '40px',
-                          borderRadius: '10px',
-                          backgroundColor: `${w.colorCode}22`,
-                          color: w.colorCode,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
+                          width: '48px', height: '48px', borderRadius: '14px', flexShrink: 0,
+                          backgroundColor: `${w.colorCode}20`, color: w.colorCode,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center'
                         }}>
-                          {w.type === 'cash' ? <Coins size={20} /> : <CreditCard size={20} />}
+                          {w.type === 'cash' ? <Coins size={22} /> : <CreditCard size={22} />}
                         </div>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '14px' }}>{w.name}</div>
-                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                            Số dư: <strong>{w.balance.toLocaleString('vi-VN')} đ</strong>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)' }}>{w.name}</span>
+                            {!isSpending && (
+                              <span style={{
+                                fontSize: '10px', fontWeight: 700, padding: '2px 7px',
+                                borderRadius: '8px', backgroundColor: '#71717a18', color: '#71717a',
+                                border: '1px solid #71717a30'
+                              }}>Lưu trữ</span>
+                            )}
                           </div>
+                          <div style={{ fontSize: '13px', marginTop: '3px' }}>
+                            <span style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
+                              {w.balance.toLocaleString('vi-VN')} đ
+                            </span>
+                            {!isSpending && (
+                              <span style={{ color: '#71717a', fontSize: '11px' }}> · Ẩn khỏi tổng số dư</span>
+                            )}
+                          </div>
+                        </div>
+                        {isDefault && (
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0,
+                            fontSize: '10px', fontWeight: 700,
+                            color: 'var(--primary)', backgroundColor: 'var(--primary-bg)',
+                            padding: '4px 8px', borderRadius: '8px', border: '1px solid var(--primary-light)'
+                          }}>
+                            <Star size={10} fill="currentColor" />
+                            Mặc định
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Tầng 2: Toggle ví mặc định */}
+                      <div
+                        onClick={() => !isDefault && handleSetDefaultWallet(w.walletId)}
+                        style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '10px 12px', borderRadius: '10px', marginBottom: '12px',
+                          backgroundColor: isDefault ? 'var(--primary-bg)' : 'var(--bg-grey)',
+                          border: `1px solid ${isDefault ? 'var(--primary-light)' : 'transparent'}`,
+                          cursor: isDefault ? 'default' : 'pointer',
+                          transition: 'background-color 0.15s'
+                        }}
+                      >
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>Ví mặc định</div>
+                          <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>
+                            {isDefault ? 'Tự động chọn khi thêm giao dịch mới' : 'Nhấn để đặt làm ví mặc định'}
+                          </div>
+                        </div>
+                        <div style={{
+                          width: '44px', height: '24px', borderRadius: '12px', flexShrink: 0,
+                          backgroundColor: isDefault ? 'var(--primary)' : '#d1d5db',
+                          position: 'relative', transition: 'background-color 0.2s'
+                        }}>
+                          <div style={{
+                            position: 'absolute', top: '3px',
+                            left: isDefault ? '23px' : '3px',
+                            width: '18px', height: '18px', borderRadius: '50%',
+                            backgroundColor: 'white', transition: 'left 0.2s',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.25)'
+                          }} />
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                        {isDefault ? (
-                          <span style={{
-                            fontSize: '10px',
-                            backgroundColor: 'var(--primary)',
-                            color: 'white',
-                            padding: '2px 8px',
-                            borderRadius: '10px',
-                            fontWeight: 700
-                          }}>Ví mặc định</span>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleSetDefaultWallet(w.walletId)}
-                            style={{
-                              background: 'none',
-                              border: '1px solid var(--border)',
-                              fontSize: '10px',
-                              padding: '2px 8px',
-                              borderRadius: '10px',
-                              cursor: 'pointer',
-                              color: 'var(--text-secondary)',
-                              fontWeight: 600
-                            }}
-                          >
-                            Đặt mặc định
-                          </button>
-                        )}
-
+                      {/* Tầng 3: Action bar */}
+                      <div style={{
+                        display: 'flex', borderRadius: '10px', overflow: 'hidden',
+                        border: '1px solid var(--border)'
+                      }}>
                         <button
                           type="button"
                           onClick={() => {
                             setEditingWalletId(w.walletId);
                             setEditWalletName(w.name);
                             setEditWalletBalance(w.balance);
+                            setEditWalletIncludeInBalance(w.includeInBalance !== false);
                           }}
                           style={{
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--primary)',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
+                            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            justifyContent: 'center', gap: '4px', padding: '10px 6px',
+                            background: 'none', border: 'none', borderRight: '1px solid var(--border)',
+                            cursor: 'pointer', color: 'var(--primary)', transition: 'background-color 0.15s'
                           }}
+                          onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--primary-bg)')}
+                          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
                         >
-                          Sửa
+                          <Pencil size={16} />
+                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Sửa tên</span>
                         </button>
 
                         <button
@@ -979,26 +1323,35 @@ export default function SettingsPage() {
                             setShowAdjustKeypad(true);
                           }}
                           style={{
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--primary)',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            cursor: 'pointer'
+                            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            justifyContent: 'center', gap: '4px', padding: '10px 6px',
+                            background: 'none', border: 'none', borderRight: '1px solid var(--border)',
+                            cursor: 'pointer', color: '#8338EC', transition: 'background-color 0.15s'
                           }}
+                          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#8338EC12')}
+                          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
                         >
-                          Cân đối
+                          <SlidersHorizontal size={16} />
+                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Cân đối</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => handleDeleteWallet(w.walletId)}
-                          style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                          style={{
+                            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                            justifyContent: 'center', gap: '4px', padding: '10px 6px',
+                            background: 'none', border: 'none',
+                            cursor: 'pointer', color: 'var(--danger)', transition: 'background-color 0.15s'
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#ff000010')}
+                          onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'transparent')}
                         >
                           <Trash2 size={16} />
+                          <span style={{ fontSize: '11px', fontWeight: 600 }}>Xóa ví</span>
                         </button>
                       </div>
-                    </div>
+                    </>
                   )}
                 </div>
               );
@@ -1046,11 +1399,10 @@ export default function SettingsPage() {
               </div>
               <div className="form-group">
                 <label>Hạn mức chi tối đa hàng tháng (VND)</label>
-                <input
-                  type="number"
+                <CurrencyInput
                   className="form-control"
                   value={newBudgetLimit}
-                  onChange={(e) => setNewBudgetLimit(parseInt(e.target.value) || 0)}
+                  onChange={setNewBudgetLimit}
                 />
               </div>
               <button
@@ -1075,11 +1427,10 @@ export default function SettingsPage() {
                       <div style={{ fontWeight: 700, fontSize: '14px' }}>Hạn mức: {b.category}</div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
                         <label>Số tiền hạn mức tối đa (VND)</label>
-                        <input
-                          type="number"
+                        <CurrencyInput
                           className="form-control"
                           value={editBudgetLimit}
-                          onChange={(e) => setEditBudgetLimit(parseInt(e.target.value) || 0)}
+                          onChange={setEditBudgetLimit}
                         />
                       </div>
                       <div style={{ display: 'flex', gap: '8px' }}>
@@ -1612,21 +1963,36 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* Dim overlay khi keypad mở */}
+      {showAdjustKeypad && adjustingWalletId && (
+        <div
+          onClick={() => setShowAdjustKeypad(false)}
+          style={{
+            position: 'fixed', inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.25)',
+            zIndex: 1099
+          }}
+        />
+      )}
+
       {/* Custom Keypad for Wallet Balance Adjustment */}
       {showAdjustKeypad && adjustingWalletId && (
         <div style={{
           position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
+          bottom: 64,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: '100%',
+          maxWidth: '480px',
           backgroundColor: '#ECEAE4',
           borderTop: '1px solid var(--border)',
+          borderRadius: '16px 16px 0 0',
           padding: '12px 10px',
           display: 'grid',
           gridTemplateColumns: 'repeat(4, 1fr)',
           gap: '8px',
           zIndex: 1100,
-          boxShadow: '0 -6px 24px rgba(0,0,0,0.15)'
+          boxShadow: '0 -6px 24px rgba(0,0,0,0.18)'
         }}>
           {/* Keypad header / close action */}
           <div style={{

@@ -3,13 +3,30 @@ import { useConfirm } from '../../components/ConfirmDialog';
 import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
 import { generateDailyMenu } from '../../core/gemini';
-import type { DailyMenuResponse } from '../../core/gemini';
+import type { DailyMenuResponse, Meal } from '../../core/gemini';
+import AddMealModal from './AddMealModal';
+import RecipeGuideModal from './RecipeGuideModal';
 import { getMergedIngredients } from '../../core/constants';
 import { db } from '../../firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { Calendar, Flame, RefreshCw, ShoppingCart, Sparkles, CheckSquare, Square, ChefHat, Heart, Trash2, Plus, X, Pencil } from 'lucide-react';
+import { Flame, ShoppingCart, Sparkles, CheckSquare, Square, ChefHat, Heart, Trash2, Plus, X, BookOpen } from 'lucide-react';
 import PullToRefresh from '../../components/PullToRefresh';
 import type { FavoriteMenu } from '../../types';
+
+// Dishes served as-is — no cooking guide needed
+const SIMPLE_DISH_PREFIXES = [
+  'com trang', 'chuoi', 'tao', 'cam', 'xoai', 'nho', 'oi', 'le', 'mit',
+  'buoi', 'du du', 'dua', 'nhan', 'vai', 'man', 'quyt', 'chanh',
+  'dua hau', 'thanh long', 'chom chom', 'mang cut', 'trai cay', 'hoa qua',
+  'sua', 'nuoc loc', 'nuoc ep', 'sinh to',
+];
+function removeDiacritics(s: string) {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+}
+const needsCookingGuide = (name: string): boolean => {
+  const normalized = removeDiacritics(name.trim());
+  return !SIMPLE_DISH_PREFIXES.some(p => normalized === p || normalized.startsWith(p + ' '));
+};
 
 const DAYS_OF_WEEK = [
   { id: 'monday', name: 'Thứ 2' },
@@ -32,14 +49,10 @@ export default function MenuPage() {
   const [activeSubTab, setActiveSubTab] = useState<'menu' | 'shopping' | 'favorites'>('menu');
   const [purchasedIngredients, setPurchasedIngredients] = useState<string[]>([]);
 
-  // Manual Meal addition state
-  const [showManualAdd, setShowManualAdd] = useState(false);
-  const [manualMealType, setManualMealType] = useState<'breakfast' | 'lunch' | 'dinner'>('breakfast');
-  const [manualRecipeName, setManualRecipeName] = useState('');
-  const [manualCalories, setManualCalories] = useState(300);
-  const [manualCost, setManualCost] = useState(25000);
-
-  // Edit meal item state
+  const [recipeGuideFor, setRecipeGuideFor] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addModalMealType, setAddModalMealType] = useState<'breakfast' | 'lunch' | 'dinner'>('lunch');
+  const [addModalInitialMeal, setAddModalInitialMeal] = useState<Meal | null>(null);
   const [editingMeal, setEditingMeal] = useState<{ mealType: 'breakfast' | 'lunch' | 'dinner'; index: number } | null>(null);
 
   // Favorite Menu save state
@@ -67,6 +80,9 @@ export default function MenuPage() {
   };
 
   // Generate Menu for the selected day using Gemini API (or Mock)
+  const familySize = Math.max(1, family?.members?.length || 3);
+  const perPersonCalTarget = family ? Math.round(family.nutritionTargets.calories / familySize) : 2000;
+
   const handleGenerateDay = async () => {
     if (!user || !family) return;
     if (availableIngredients.length === 0) {
@@ -77,12 +93,11 @@ export default function MenuPage() {
     setLoading(true);
     try {
       const response = await generateDailyMenu({
-        dailyCalorieTarget: family.nutritionTargets.calories,
+        dailyCalorieTarget: perPersonCalTarget,
         availableIngredients,
-        recentMeals: Object.values(weeklyMenu).flatMap(dayMenu => 
+        recentMeals: Object.values(weeklyMenu).flatMap(dayMenu =>
           Object.values(dayMenu.meals).flatMap(mealList => mealList.map(m => m.recipeName))
         ),
-        budgetLimit: 160000 // Average budget limit 160k VND
       });
 
       const updatedMenu = { ...weeklyMenu, [selectedDay]: response };
@@ -91,47 +106,6 @@ export default function MenuPage() {
     } catch (err) {
       console.error(err);
       alert("Không thể kết nối dịch vụ AI. Đang chạy chế độ offline.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Shuffle a single meal item using Gemini AI (mock/actual)
-  const handleShuffleMeal = async (mealType: 'breakfast' | 'lunch' | 'dinner', mealIndex: number) => {
-    if (!user || !family) return;
-    const currentDayMenu = weeklyMenu[selectedDay];
-    if (!currentDayMenu) return;
-
-    setLoading(true);
-    try {
-      // Prompt Gemini to suggest a substitution or fallback to mock
-      const targetCal = currentDayMenu.meals[mealType][mealIndex].calories;
-      const response = await generateDailyMenu({
-        dailyCalorieTarget: targetCal * 3.5, // Scale target
-        availableIngredients,
-        recentMeals: [currentDayMenu.meals[mealType][mealIndex].recipeName],
-        budgetLimit: 60000
-      });
-
-      // Swap the item with the new suggest item
-      const newMealItem = response.meals[mealType][0] || response.meals.lunch[0];
-      const updatedMeals = { ...currentDayMenu.meals };
-      updatedMeals[mealType] = [...updatedMeals[mealType]];
-      updatedMeals[mealType][mealIndex] = newMealItem;
-
-      // Re-calculate totals
-      const newDayMenu: DailyMenuResponse = {
-        ...currentDayMenu,
-        meals: updatedMeals,
-        totalDayCalories: Object.values(updatedMeals).flatMap(list => list).reduce((s, m) => s + m.calories, 0),
-        estimatedTotalCost: Object.values(updatedMeals).flatMap(list => list).reduce((s, m) => s + m.estimatedCost, 0),
-      };
-
-      const updatedMenu = { ...weeklyMenu, [selectedDay]: newDayMenu };
-      setWeeklyMenu(updatedMenu);
-      await saveMenuToFirestore(updatedMenu);
-    } catch (err) {
-      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -149,12 +123,11 @@ export default function MenuPage() {
       const tempMenu: typeof weeklyMenu = {};
       for (const day of DAYS_OF_WEEK) {
         const response = await generateDailyMenu({
-          dailyCalorieTarget: family.nutritionTargets.calories,
+          dailyCalorieTarget: perPersonCalTarget,
           availableIngredients,
-          recentMeals: Object.values(tempMenu).flatMap(dayMenu => 
+          recentMeals: Object.values(tempMenu).flatMap(dayMenu =>
             Object.values(dayMenu.meals).flatMap(mealList => mealList.map(m => m.recipeName))
           ),
-          budgetLimit: 180000
         });
         tempMenu[day.id] = response;
       }
@@ -197,9 +170,7 @@ export default function MenuPage() {
     });
   };
 
-  const handleSaveManualMeal = async () => {
-    if (!manualRecipeName.trim()) return;
-
+  const handleSaveMealFromModal = async (meal: Meal) => {
     let currentDayMenu = weeklyMenu[selectedDay];
     if (!currentDayMenu) {
       currentDayMenu = {
@@ -207,51 +178,38 @@ export default function MenuPage() {
         totalDayCalories: 0,
         estimatedTotalCost: 0,
         nutritionSummary: {
-          proteinGrams: Math.round((family!.nutritionTargets.calories * 0.20) / 4),
-          carbsGrams: Math.round((family!.nutritionTargets.calories * 0.55) / 4),
-          fatGrams: Math.round((family!.nutritionTargets.calories * 0.25) / 9)
+          proteinGrams: Math.round((perPersonCalTarget * 0.20) / 4),
+          carbsGrams: Math.round((perPersonCalTarget * 0.55) / 4),
+          fatGrams: Math.round((perPersonCalTarget * 0.25) / 9),
         },
-        healthNote: "Thực đơn tự thiết lập thủ công"
+        healthNote: 'Thực đơn tự thiết lập',
       };
     }
 
-    const newDish = {
-      recipeName: manualRecipeName.trim(),
-      calories: manualCalories,
-      estimatedCost: manualCost,
-      ingredientsUsed: [] as string[]
-    };
-
     const updatedMeals = { ...currentDayMenu.meals };
-
     if (editingMeal) {
-      // Update existing dish
-      updatedMeals[manualMealType] = [...updatedMeals[manualMealType]];
-      const existingDish = updatedMeals[manualMealType][editingMeal.index];
-      updatedMeals[manualMealType][editingMeal.index] = {
-        ...newDish,
-        ingredientsUsed: existingDish?.ingredientsUsed || []
+      updatedMeals[editingMeal.mealType] = [...updatedMeals[editingMeal.mealType]];
+      updatedMeals[editingMeal.mealType][editingMeal.index] = {
+        ...meal,
+        ingredientsUsed: updatedMeals[editingMeal.mealType][editingMeal.index]?.ingredientsUsed || meal.ingredientsUsed,
       };
     } else {
-      // Add new dish
-      updatedMeals[manualMealType] = [...updatedMeals[manualMealType], newDish];
+      updatedMeals[addModalMealType] = [...updatedMeals[addModalMealType], meal];
     }
 
     const newDayMenu: DailyMenuResponse = {
       ...currentDayMenu,
       meals: updatedMeals,
-      totalDayCalories: Object.values(updatedMeals).flatMap(list => list).reduce((s, m) => s + m.calories, 0),
-      estimatedTotalCost: Object.values(updatedMeals).flatMap(list => list).reduce((s, m) => s + m.estimatedCost, 0),
+      totalDayCalories: Object.values(updatedMeals).flatMap(l => l).reduce((s, m) => s + m.calories, 0),
+      estimatedTotalCost: Object.values(updatedMeals).flatMap(l => l).reduce((s, m) => s + m.estimatedCost, 0),
     };
 
     const updatedMenu = { ...weeklyMenu, [selectedDay]: newDayMenu };
     setWeeklyMenu(updatedMenu);
     await saveMenuToFirestore(updatedMenu);
-    
-    // Reset
-    setManualRecipeName('');
-    setShowManualAdd(false);
+    setShowAddModal(false);
     setEditingMeal(null);
+    setAddModalInitialMeal(null);
   };
 
   // Delete a single meal item
@@ -281,22 +239,6 @@ export default function MenuPage() {
     const updatedMenu = { ...weeklyMenu, [selectedDay]: newDayMenu };
     setWeeklyMenu(updatedMenu);
     await saveMenuToFirestore(updatedMenu);
-  };
-
-  // Open edit modal for an existing dish
-  const handleEditMeal = (mealType: 'breakfast' | 'lunch' | 'dinner', mealIndex: number) => {
-    const currentDayMenu = weeklyMenu[selectedDay];
-    if (!currentDayMenu) return;
-
-    const dish = currentDayMenu.meals[mealType][mealIndex];
-    if (!dish) return;
-
-    setManualMealType(mealType);
-    setManualRecipeName(dish.recipeName);
-    setManualCalories(dish.calories);
-    setManualCost(dish.estimatedCost);
-    setEditingMeal({ mealType, index: mealIndex });
-    setShowManualAdd(true);
   };
 
   // Delete the entire menu for the selected day
@@ -349,9 +291,9 @@ export default function MenuPage() {
         totalDayCalories: Object.values(fav.meals).flatMap(list => list).reduce((s, m) => s + m.calories, 0),
         estimatedTotalCost: Object.values(fav.meals).flatMap(list => list).reduce((s, m) => s + m.estimatedCost, 0),
         nutritionSummary: {
-          proteinGrams: Math.round((family.nutritionTargets.calories * 0.20) / 4),
-          carbsGrams: Math.round((family.nutritionTargets.calories * 0.55) / 4),
-          fatGrams: Math.round((family.nutritionTargets.calories * 0.25) / 9)
+          proteinGrams: Math.round((perPersonCalTarget * 0.20) / 4),
+          carbsGrams: Math.round((perPersonCalTarget * 0.55) / 4),
+          fatGrams: Math.round((perPersonCalTarget * 0.25) / 9)
         },
         healthNote: `Áp dụng từ thực đơn yêu thích: ${fav.name}`
       }
@@ -537,177 +479,183 @@ export default function MenuPage() {
           )}
 
           {/* Calorie Goal Indicator */}
-          {selectedDayMenu && family && (
-            <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px', fontWeight: 600 }}><Flame size={16} style={{ color: 'var(--primary)' }} /> Dinh dưỡng ngày {DAYS_OF_WEEK.find(d => d.id === selectedDay)?.name}</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '13px', fontWeight: 600 }}>{selectedDayMenu.totalDayCalories} / {family.nutritionTargets.calories} Kcal</span>
+          {selectedDayMenu && family && (() => {
+            const pct = Math.round((selectedDayMenu.totalDayCalories / perPersonCalTarget) * 100);
+            const onTarget = Math.abs(selectedDayMenu.totalDayCalories - perPersonCalTarget) < 300;
+            const barColor = onTarget ? 'var(--secondary)' : 'var(--accent)';
+            const { proteinGrams, carbsGrams, fatGrams } = selectedDayMenu.nutritionSummary;
+            return (
+              <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {/* Row 1 — title + save */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    <Flame size={15} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                    Dinh dưỡng {DAYS_OF_WEEK.find(d => d.id === selectedDay)?.name}
+                  </span>
                   <button
                     type="button"
-                    onClick={() => {
-                      setFavName(`Thực đơn ngày ${DAYS_OF_WEEK.find(d => d.id === selectedDay)?.name}`);
-                      setShowSaveFav(true);
-                    }}
-                    style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}
+                    onClick={() => { setFavName(`Thực đơn ngày ${DAYS_OF_WEEK.find(d => d.id === selectedDay)?.name}`); setShowSaveFav(true); }}
+                    style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '2px' }}
                     title="Lưu yêu thích"
                   >
-                    <Heart size={16} fill="var(--primary)" />
+                    <Heart size={15} fill="var(--primary)" />
                   </button>
                 </div>
+
+                {/* Row 2 — calories + bar */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                    <span style={{ fontSize: '22px', fontWeight: 800, color: barColor, lineHeight: 1 }}>
+                      {selectedDayMenu.totalDayCalories.toLocaleString('vi-VN')}
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginLeft: '3px' }}>Kcal</span>
+                    </span>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                      mục tiêu {perPersonCalTarget.toLocaleString('vi-VN')} Kcal/người · <span style={{ fontWeight: 700, color: barColor }}>{pct}%</span>
+                    </span>
+                  </div>
+                  <div style={{ height: '6px', backgroundColor: 'var(--bg-grey)', borderRadius: '99px', overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${Math.min(pct, 100)}%`,
+                      backgroundColor: barColor,
+                      borderRadius: '99px',
+                      transition: 'width 0.4s ease',
+                    }} />
+                  </div>
+                </div>
+
+                {/* Row 3 — macros chips */}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {[
+                    { label: 'Đạm', value: proteinGrams, unit: 'g', color: '#E07A5F', bg: 'rgba(224,122,95,0.10)' },
+                    { label: 'Carbs', value: carbsGrams, unit: 'g', color: 'var(--accent)', bg: 'rgba(244,162,97,0.12)' },
+                    { label: 'Béo', value: fatGrams,    unit: 'g', color: 'var(--secondary)', bg: 'rgba(129,178,154,0.14)' },
+                  ].map(m => (
+                    <div key={m.label} style={{
+                      flex: 1, textAlign: 'center', padding: '6px 4px',
+                      borderRadius: '8px', backgroundColor: m.bg,
+                    }}>
+                      <div style={{ fontSize: '13px', fontWeight: 800, color: m.color }}>{m.value}g</div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 500, marginTop: '1px' }}>{m.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Row 4 — health note */}
+                {selectedDayMenu.healthNote && (
+                  <div style={{
+                    fontSize: '11px', color: 'var(--text-secondary)', fontStyle: 'italic',
+                    borderTop: '1px solid var(--border)', paddingTop: '8px',
+                    lineHeight: 1.5,
+                  }}>
+                    💡 {selectedDayMenu.healthNote}
+                  </div>
+                )}
               </div>
-              <div style={{ height: '8px', backgroundColor: 'var(--bg-grey)', borderRadius: '4px', overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%',
-                  width: `${Math.min((selectedDayMenu.totalDayCalories / family.nutritionTargets.calories) * 100, 100)}%`,
-                  backgroundColor: Math.abs(selectedDayMenu.totalDayCalories - family.nutritionTargets.calories) < 400 ? 'var(--secondary)' : 'var(--accent)',
-                  borderRadius: '4px'
-                }}></div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                <span>Đạm (P): {selectedDayMenu.nutritionSummary.proteinGrams}g</span>
-                <span>Bột đường (C): {selectedDayMenu.nutritionSummary.carbsGrams}g</span>
-                <span>Béo (F): {selectedDayMenu.nutritionSummary.fatGrams}g</span>
-              </div>
-              <div style={{ fontSize: '11px', fontStyle: 'italic', borderTop: '1px solid var(--border)', paddingTop: '6px', marginTop: '4px' }}>
-                💡 {selectedDayMenu.healthNote}
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Meals list */}
           {selectedDayMenu ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              {(['breakfast', 'lunch', 'dinner'] as const).map(mealType => (
-                <div key={mealType}>
-                  <h4 style={{
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: 'var(--primary-dark)',
-                    marginBottom: '8px',
-                    paddingLeft: '4px'
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {(['breakfast', 'lunch', 'dinner'] as const).map(mealType => {
+                const MEAL_META = {
+                  breakfast: { emoji: '🌅', label: 'Bữa Sáng', color: '#F4A261' },
+                  lunch:     { emoji: '☀️',  label: 'Bữa Trưa', color: '#FF8C69' },
+                  dinner:    { emoji: '🌙', label: 'Bữa Tối',  color: '#81B29A' },
+                };
+                const meta = MEAL_META[mealType];
+                return (
+                <div key={mealType} style={{ marginBottom: '12px' }}>
+                  {/* Section header */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: '6px',
+                    marginBottom: '8px', paddingLeft: '2px',
                   }}>
-                    {mealType === 'breakfast' ? 'Bữa Sáng' : mealType === 'lunch' ? 'Bữa Trưa' : 'Bữa Tối'}
-                  </h4>
+                    <div style={{
+                      width: '3px', height: '16px', borderRadius: '2px',
+                      backgroundColor: meta.color, flexShrink: 0,
+                    }} />
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: meta.color, letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+                      {meta.emoji} {meta.label}
+                    </span>
+                  </div>
 
+                  {/* Dish cards */}
                   {selectedDayMenu.meals[mealType].map((dish, idx) => (
-                    <div key={idx} className="card" style={{
-                      margin: 0,
-                      marginBottom: '8px',
-                      padding: '12px 16px',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
+                    <div key={idx} style={{
+                      display: 'flex', alignItems: 'flex-start', gap: '10px',
+                      padding: '10px 12px', marginBottom: '6px',
+                      backgroundColor: 'var(--bg-card)',
+                      border: '1px solid var(--border)',
+                      borderRadius: '10px',
+                      boxShadow: 'var(--shadow-sm)',
                     }}>
+                      {/* Calorie pill */}
+                      <div style={{
+                        flexShrink: 0, minWidth: '48px', textAlign: 'center',
+                        padding: '4px 6px', borderRadius: '8px',
+                        backgroundColor: 'rgba(255,140,105,0.10)',
+                      }}>
+                        <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--primary)', lineHeight: 1 }}>{dish.calories}</div>
+                        <div style={{ fontSize: '9px', color: 'var(--text-secondary)', marginTop: '1px', fontWeight: 500 }}>Kcal</div>
+                      </div>
+
+                      {/* Name */}
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 700, fontSize: '15px' }}>{dish.recipeName}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', gap: '8px', marginTop: '4px' }}>
-                          <span>{dish.calories} Kcal</span>
-                          <span>•</span>
-                          <span>Dự tính: {dish.estimatedCost.toLocaleString('vi-VN')}đ</span>
+                        <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.4 }}>
+                          {dish.recipeName}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '2px', alignItems: 'center', flexShrink: 0 }}>
-                        <button
-                          type="button"
-                          onClick={() => handleEditMeal(mealType, idx)}
-                          title="Sửa món"
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--primary)',
-                            cursor: 'pointer',
-                            padding: '6px',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            transition: 'background 0.15s'
-                          }}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--primary-bg)')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                        >
-                          <Pencil size={15} />
-                        </button>
+
+                      {/* Actions */}
+                      <div style={{ display: 'flex', gap: '0px', flexShrink: 0 }}>
+                        {needsCookingGuide(dish.recipeName) && (
+                          <button
+                            type="button"
+                            onClick={() => setRecipeGuideFor(dish.recipeName)}
+                            title="Xem cách nấu"
+                            style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '6px', borderRadius: '6px', display: 'flex', alignItems: 'center' }}
+                            onMouseEnter={e => (e.currentTarget.style.color = 'var(--primary)')}
+                            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
+                          >
+                            <BookOpen size={15} />
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleDeleteMeal(mealType, idx)}
                           title="Xóa món"
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--accent)',
-                            cursor: 'pointer',
-                            padding: '6px',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            transition: 'background 0.15s'
-                          }}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.08)')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                          style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '6px', borderRadius: '6px', display: 'flex', alignItems: 'center' }}
+                          onMouseEnter={e => (e.currentTarget.style.color = 'var(--danger)')}
+                          onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
                         >
                           <Trash2 size={15} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleShuffleMeal(mealType, idx)}
-                          title="Đổi món khác"
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            color: 'var(--text-secondary)',
-                            cursor: 'pointer',
-                            padding: '6px',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            transition: 'background 0.15s'
-                          }}
-                          disabled={loading}
-                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-grey)')}
-                          onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                        >
-                          <RefreshCw size={14} className={loading ? 'spin' : ''} />
                         </button>
                       </div>
                     </div>
                   ))}
 
+                  {/* Add button */}
                   <button
                     type="button"
-                    onClick={() => {
-                      setManualMealType(mealType);
-                      setManualRecipeName('');
-                      setManualCalories(200);
-                      setManualCost(15000);
-                      setEditingMeal(null);
-                      setShowManualAdd(true);
-                    }}
+                    onClick={() => { setAddModalMealType(mealType); setAddModalInitialMeal(null); setEditingMeal(null); setShowAddModal(true); }}
                     style={{
-                      width: '100%',
-                      height: '36px',
-                      borderRadius: 'var(--border-radius-sm)',
+                      width: '100%', height: '34px',
+                      borderRadius: '10px',
                       border: '1px dashed var(--border)',
                       backgroundColor: 'transparent',
                       color: 'var(--text-secondary)',
-                      fontSize: '12px',
-                      fontWeight: 600,
+                      fontSize: '12px', fontWeight: 600,
                       cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '4px',
-                      marginBottom: '16px'
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
                     }}
                   >
-                    <Plus size={14} /> Thêm món thủ công
+                    <Plus size={13} /> Thêm / Gợi ý món
                   </button>
                 </div>
-              ))}
+                );
+              })}
 
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
@@ -740,17 +688,71 @@ export default function MenuPage() {
               </div>
             </div>
           ) : (
-            <div className="card" style={{ textAlign: 'center', padding: '32px' }}>
-              <Calendar size={32} style={{ color: 'var(--text-secondary)', marginBottom: '12px' }} />
-              <h3 style={{ fontSize: '15px', marginBottom: '16px' }}>Thực đơn ngày này trống</h3>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={handleGenerateDay}
-                disabled={loading}
-              >
-                {loading ? 'Đang tạo thực đơn...' : 'Gợi ý thực đơn hôm nay'}
-              </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {/* AI quick-generate the whole day */}
+              <div className="card" style={{
+                padding: '14px 16px', display: 'flex', alignItems: 'center',
+                justifyContent: 'space-between', gap: '12px',
+                backgroundColor: 'var(--primary-bg)',
+                border: '1px dashed var(--primary-light)',
+              }}>
+                <div>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--primary-dark)', marginBottom: '2px' }}>
+                    AI tạo thực đơn cả ngày
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                    Tự động gợi ý 3 bữa cân đối
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleGenerateDay}
+                  disabled={loading}
+                  style={{ flexShrink: 0, fontSize: '12px', padding: '0 16px', height: '36px', display: 'flex', alignItems: 'center', gap: '5px' }}
+                >
+                  {loading
+                    ? <><Sparkles size={13} className="spin" /> Đang tạo...</>
+                    : <><Sparkles size={13} /> Tạo ngay</>}
+                </button>
+              </div>
+
+              {/* Per-meal add buttons — disabled while AI is generating */}
+              {(['breakfast', 'lunch', 'dinner'] as const).map(mt => (
+                <div
+                  key={mt}
+                  className="card"
+                  style={{
+                    padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    opacity: loading ? 0.45 : 1,
+                    transition: 'opacity 0.2s',
+                  }}
+                >
+                  <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    {mt === 'breakfast' ? '🌅 Bữa Sáng' : mt === 'lunch' ? '☀️ Bữa Trưa' : '🌙 Bữa Tối'}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setAddModalMealType(mt);
+                      setAddModalInitialMeal(null);
+                      setEditingMeal(null);
+                      setShowAddModal(true);
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '5px',
+                      padding: '6px 14px', borderRadius: 'var(--border-radius-sm)',
+                      border: '1px solid var(--primary)',
+                      backgroundColor: 'var(--primary-bg)',
+                      color: 'var(--primary)',
+                      fontSize: '12px', fontWeight: 700, cursor: loading ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    <Plus size={13} /> Thêm / Gợi ý
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </>
@@ -857,88 +859,23 @@ export default function MenuPage() {
         </div>
       )}
 
-      {/* Manual Meal addition modal */}
-      {showManualAdd && (
-        <div style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(61, 64, 91, 0.4)',
-          backdropFilter: 'blur(4px)',
-          zIndex: 999,
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          padding: '20px'
-        }}>
-          <div className="card" style={{ margin: 0, padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '10px' }}>
-              <h3 style={{ fontSize: '16px' }}>
-                {editingMeal ? 'Sửa món' : 'Thêm món'} ({manualMealType === 'breakfast' ? 'Bữa Sáng' : manualMealType === 'lunch' ? 'Bữa Trưa' : 'Bữa Tối'})
-              </h3>
-              <button
-                type="button"
-                onClick={() => { setShowManualAdd(false); setEditingMeal(null); }}
-                style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer' }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label>Tên món ăn</label>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Ví dụ: Phở bò gia truyền, Trứng chiên..."
-                value={manualRecipeName}
-                onChange={(e) => setManualRecipeName(e.target.value)}
-              />
-            </div>
-            
-            <div style={{ display: 'flex', gap: '10px' }}>
-              <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                <label>Calo (Kcal)</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  value={manualCalories}
-                  onChange={(e) => setManualCalories(parseInt(e.target.value) || 0)}
-                />
-              </div>
-              <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                <label>Chi phí (đ)</label>
-                <input
-                  type="number"
-                  className="form-control"
-                  value={manualCost}
-                  onChange={(e) => setManualCost(parseInt(e.target.value) || 0)}
-                />
-              </div>
-            </div>
-            
-            <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-              <button
-                type="button"
-                onClick={handleSaveManualMeal}
-                className="btn btn-primary"
-                style={{ flex: 1, height: '40px' }}
-              >
-                {editingMeal ? 'Cập nhật' : 'Lưu món'}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setShowManualAdd(false); setEditingMeal(null); }}
-                className="btn btn-secondary"
-                style={{ flex: 1, height: '40px' }}
-              >
-                Hủy
-              </button>
-            </div>
-          </div>
-        </div>
+      {recipeGuideFor && (
+        <RecipeGuideModal
+          dishName={recipeGuideFor}
+          onClose={() => setRecipeGuideFor(null)}
+        />
+      )}
+
+      {showAddModal && (
+        <AddMealModal
+          mealType={addModalMealType}
+          familySize={family?.members?.length || 3}
+          availableIngredients={availableIngredients}
+          recentMeals={Object.values(weeklyMenu).flatMap(d => Object.values(d.meals).flatMap(l => l.map(m => m.recipeName)))}
+          onSave={handleSaveMealFromModal}
+          onClose={() => { setShowAddModal(false); setEditingMeal(null); setAddModalInitialMeal(null); }}
+          initialMeal={addModalInitialMeal || undefined}
+        />
       )}
 
       {/* Save Favorite Menu modal */}

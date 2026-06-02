@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import CurrencyInput from '../../components/CurrencyInput';
 import { useAuthStore } from '../../stores/authStore';
 import { useFamilyStore } from '../../stores/familyStore';
 import type { Family, FamilyMember } from '../../types';
@@ -492,11 +493,10 @@ export default function OnboardingPage() {
                 </div>
                 <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
                   <label>Số dư hiện tại (VND)</label>
-                  <input
-                    type="number"
+                  <CurrencyInput
                     className="form-control"
                     value={customWalletBalance}
-                    onChange={(e) => setCustomWalletBalance(parseInt(e.target.value) || 0)}
+                    onChange={setCustomWalletBalance}
                   />
                 </div>
               </div>
@@ -573,12 +573,11 @@ export default function OnboardingPage() {
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label style={{ fontSize: '11px' }}>Hạn mức chi tối đa (VND)</label>
                     <div style={{ position: 'relative' }}>
-                      <input
-                        type="number"
+                      <CurrencyInput
                         className="form-control"
                         value={b.limitAmount}
-                        onChange={(e) => handleBudgetLimitChange(idx, parseInt(e.target.value) || 0)}
-                        style={{ fontWeight: 700, color: 'var(--primary)' }}
+                        onChange={(v) => handleBudgetLimitChange(idx, v)}
+                        style={{ fontWeight: 700, color: 'var(--primary)', paddingRight: '72px' }}
                       />
                       <span style={{ position: 'absolute', right: '16px', top: '13px', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>đ / tháng</span>
                     </div>

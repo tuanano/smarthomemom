@@ -87,9 +87,12 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
       } else {
         setType('expense');
         setAmountExpr('');
-        const defaultId = defaultWalletId || family?.defaultWalletId || (wallets.length > 0 ? wallets[0].walletId : '');
+        const spendingWallets = wallets.filter(w => w.includeInBalance !== false);
+        const fallbackWallet = spendingWallets[0] ?? wallets[0];
+        const defaultId = defaultWalletId || family?.defaultWalletId || fallbackWallet?.walletId || '';
         setSelectedWalletId(defaultId);
-        setTargetWalletId(wallets.length > 1 ? wallets[1].walletId : (wallets[0]?.walletId || ''));
+        const otherWallet = wallets.find(w => w.walletId !== defaultId) ?? wallets[1];
+        setTargetWalletId(otherWallet?.walletId || (wallets[0]?.walletId || ''));
         
         // Initialize default category
         const defaultCat = mergedCategories.find(c => c.type === 'expense');
@@ -100,7 +103,8 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
         setDateStr(format(now, 'yyyy-MM-dd'));
         setSelectedHour(now.getHours());
         setSelectedMinute(now.getMinutes());
-        setSpentBy(family?.members?.[0]?.name || '');
+        const defaultSpender = family?.members?.find(m => m.isDefaultSpender) ?? family?.members?.[0];
+        setSpentBy(defaultSpender?.name || '');
         setShowKeypad(true); // Automatically show keypad for new transactions
       }
     }
@@ -137,6 +141,15 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
     } catch {
       return 0;
     }
+  };
+
+  // Format display: số thuần → có dấu phân cách, expression → giữ nguyên
+  const formatExprDisplay = (expr: string): string => {
+    if (!expr) return '';
+    if (/^[0-9]+$/.test(expr)) {
+      return parseInt(expr, 10).toLocaleString('vi-VN');
+    }
+    return expr;
   };
 
   // Keypad interactions
@@ -315,7 +328,7 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
         </div>
 
         {/* Form Area */}
-        <div className="scrollable" style={{ paddingBottom: showKeypad ? '280px' : '20px' }}>
+        <div className="scrollable" style={{ paddingBottom: showKeypad ? '320px' : '20px' }}>
           {/* Transaction Type Tabs */}
           <div style={{
             display: 'flex',
@@ -379,7 +392,7 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
                   height: '48px',
                 }}
               >
-                <span>{amountExpr || '0'}</span>
+                <span>{formatExprDisplay(amountExpr) || '0'}</span>
                 {showKeypad && (
                   <span 
                     className="blinking-cursor" 
@@ -465,15 +478,22 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
               <select
                 className="form-control"
                 value={selectedWalletId}
-                onChange={(e) => {
-                  const newWalletId = e.target.value;
-                  setSelectedWalletId(newWalletId);
-                }}
+                onChange={(e) => setSelectedWalletId(e.target.value)}
               >
-                {wallets.map(w => (
-                  <option key={w.walletId} value={w.walletId}>{w.name} ({w.balance.toLocaleString('vi-VN')}đ)</option>
+                {(type === 'expense'
+                  ? wallets.filter(w => w.includeInBalance !== false)
+                  : wallets
+                ).map(w => (
+                  <option key={w.walletId} value={w.walletId}>
+                    {w.name} ({w.balance.toLocaleString('vi-VN')}đ)
+                  </option>
                 ))}
               </select>
+              {type === 'expense' && wallets.some(w => w.includeInBalance === false) && (
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  * Ví lưu trữ không thể dùng để chi tiêu
+                </div>
+              )}
             </div>
 
             {type === 'transfer' && (
@@ -485,7 +505,9 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
                   onChange={(e) => setTargetWalletId(e.target.value)}
                 >
                   {wallets.map(w => (
-                    <option key={w.walletId} value={w.walletId}>{w.name} ({w.balance.toLocaleString('vi-VN')}đ)</option>
+                    <option key={w.walletId} value={w.walletId}>
+                      {w.name} ({w.balance.toLocaleString('vi-VN')}đ){w.includeInBalance === false ? ' [Lưu trữ]' : ''}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -693,7 +715,7 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
           </div>
         </div>
 
-        {/* Custom Calculator Keypad Panel (Fixed at Bottom of modal) */}
+        {/* Custom Calculator Keypad Panel */}
         {showKeypad && (
           <div ref={keypadRef} style={{
             position: 'absolute',
@@ -702,112 +724,92 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
             right: 0,
             backgroundColor: '#ECEAE4',
             borderTop: '1px solid var(--border)',
-            padding: '10px',
+            borderRadius: '16px 16px 0 0',
+            padding: '12px 10px',
             display: 'grid',
             gridTemplateColumns: 'repeat(4, 1fr)',
-            gap: '6px',
+            gap: '8px',
             zIndex: 101,
-            boxShadow: '0 -4px 20px rgba(0,0,0,0.08)'
+            boxShadow: '0 -6px 24px rgba(0,0,0,0.12)'
           }}>
+            {/* Header */}
+            <div style={{
+              gridColumn: 'span 4',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '2px 4px 6px'
+            }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                Nhập số tiền
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowKeypad(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--primary)',
+                  fontWeight: 700,
+                  fontSize: '15px',
+                  cursor: 'pointer',
+                  padding: '4px 8px'
+                }}
+              >
+                Xong
+              </button>
+            </div>
+
             {/* Row 1 */}
             {['7', '8', '9', '/'].map(k => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => handleKeyPress(k)}
-                style={{
-                  height: '46px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  fontSize: '18px',
-                  fontWeight: 600,
-                  backgroundColor: 'var(--bg-card)',
-                  color: 'var(--text-primary)',
-                  cursor: 'pointer',
-                  boxShadow: 'var(--shadow-sm)'
-                }}
-              >
-                {k}
-              </button>
+              <button key={k} type="button" onClick={() => handleKeyPress(k)} style={{
+                height: '46px', borderRadius: '8px', border: 'none',
+                fontSize: '18px', fontWeight: 700,
+                backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)',
+                cursor: 'pointer', boxShadow: 'var(--shadow-sm)'
+              }}>{k}</button>
             ))}
+
             {/* Row 2 */}
             {['4', '5', '6', '*'].map(k => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => handleKeyPress(k)}
-                style={{
-                  height: '46px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  fontSize: '18px',
-                  fontWeight: 600,
-                  backgroundColor: 'var(--bg-card)',
-                  color: 'var(--text-primary)',
-                  cursor: 'pointer',
-                  boxShadow: 'var(--shadow-sm)'
-                }}
-              >
-                {k}
-              </button>
+              <button key={k} type="button" onClick={() => handleKeyPress(k)} style={{
+                height: '46px', borderRadius: '8px', border: 'none',
+                fontSize: '18px', fontWeight: 700,
+                backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)',
+                cursor: 'pointer', boxShadow: 'var(--shadow-sm)'
+              }}>{k}</button>
             ))}
+
             {/* Row 3 */}
             {['1', '2', '3', '-'].map(k => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => handleKeyPress(k)}
-                style={{
-                  height: '46px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  fontSize: '18px',
-                  fontWeight: 600,
-                  backgroundColor: 'var(--bg-card)',
-                  color: 'var(--text-primary)',
-                  cursor: 'pointer',
-                  boxShadow: 'var(--shadow-sm)'
-                }}
-              >
-                {k}
-              </button>
+              <button key={k} type="button" onClick={() => handleKeyPress(k)} style={{
+                height: '46px', borderRadius: '8px', border: 'none',
+                fontSize: '18px', fontWeight: 700,
+                backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)',
+                cursor: 'pointer', boxShadow: 'var(--shadow-sm)'
+              }}>{k}</button>
             ))}
+
             {/* Row 4 */}
             {['0', '000', 'back', '+'].map(k => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => handleKeyPress(k)}
-                style={{
-                  height: '46px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  fontSize: k === 'back' ? '15px' : '18px',
-                  fontWeight: 600,
-                  backgroundColor: k === 'back' ? 'var(--border)' : 'var(--bg-card)',
-                  color: 'var(--text-primary)',
-                  cursor: 'pointer',
-                  boxShadow: 'var(--shadow-sm)'
-                }}
-              >
-                {k === 'back' ? 'Xóa' : k}
-              </button>
+              <button key={k} type="button" onClick={() => handleKeyPress(k)} style={{
+                height: '46px', borderRadius: '8px', border: 'none',
+                fontSize: k === 'back' ? '14px' : '18px', fontWeight: 700,
+                backgroundColor: k === 'back' ? 'var(--border)' : 'var(--bg-card)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer', boxShadow: 'var(--shadow-sm)'
+              }}>{k === 'back' ? 'Xóa' : k}</button>
             ))}
+
             {/* Row 5 */}
             <button
               type="button"
               onClick={() => handleKeyPress('C')}
               style={{
-                gridColumn: 'span 2',
-                height: '46px',
-                borderRadius: '8px',
-                border: 'none',
-                fontSize: '16px',
-                fontWeight: 600,
-                backgroundColor: '#FFA29A',
-                color: '#FFF',
-                cursor: 'pointer',
-                boxShadow: 'var(--shadow-sm)'
+                gridColumn: 'span 2', height: '46px', borderRadius: '8px', border: 'none',
+                fontSize: '15px', fontWeight: 700,
+                backgroundColor: '#FFA29A', color: '#FFF',
+                cursor: 'pointer', boxShadow: 'var(--shadow-sm)'
               }}
             >
               Xóa hết (C)
@@ -816,16 +818,10 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
               type="button"
               onClick={() => handleKeyPress('=')}
               style={{
-                gridColumn: 'span 2',
-                height: '46px',
-                borderRadius: '8px',
-                border: 'none',
-                fontSize: '18px',
-                fontWeight: 600,
-                backgroundColor: 'var(--primary)',
-                color: '#FFF',
-                cursor: 'pointer',
-                boxShadow: 'var(--shadow-sm)'
+                gridColumn: 'span 2', height: '46px', borderRadius: '8px', border: 'none',
+                fontSize: '16px', fontWeight: 700,
+                backgroundColor: 'var(--primary)', color: '#FFF',
+                cursor: 'pointer', boxShadow: 'var(--shadow-sm)'
               }}
             >
               = Tính toán

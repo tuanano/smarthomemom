@@ -1,10 +1,10 @@
 import { useFamilyStore } from '../stores/familyStore';
+import { DEFAULT_INGREDIENTS } from './constants';
 
 interface SuggestionRequest {
   dailyCalorieTarget: number;
   availableIngredients: string[];
   recentMeals: string[];
-  budgetLimit: number;
 }
 
 export interface Meal {
@@ -30,77 +30,131 @@ export interface DailyMenuResponse {
   healthNote: string;
 }
 
-// Local mock database of common Vietnamese dishes for fallback generator
-const MOCK_RECIPES = [
-  { name: 'Phở bò ăn sáng', type: 'breakfast', calories: 450, cost: 45000, ingredients: ['thit_bo', 'gao', 'hanh_toi'] },
-  { name: 'Bún sườn heo', type: 'breakfast', calories: 420, cost: 35000, ingredients: ['thit_heo', 'gao', 'hanh_toi'] },
-  { name: 'Trứng ốp la bánh mì', type: 'breakfast', calories: 350, cost: 15000, ingredients: ['trung_ga', 'gao'] },
-  { name: 'Cháo sườn heo', type: 'breakfast', calories: 300, cost: 20000, ingredients: ['thit_heo', 'gao', 'hanh_toi'] },
-  
-  { name: 'Thịt kho trứng tộ', type: 'main', calories: 450, cost: 50000, ingredients: ['thit_heo', 'trung_ga', 'hanh_toi'] },
-  { name: 'Bò xào hành cần', type: 'main', calories: 380, cost: 70000, ingredients: ['thit_bo', 'hanh_toi'] },
-  { name: 'Cá lóc kho tộ', type: 'main', calories: 320, cost: 45000, ingredients: ['ca_loc', 'hanh_toi'] },
-  { name: 'Đậu hũ dồn thịt sốt cà', type: 'main', calories: 290, cost: 30000, ingredients: ['dau_hu', 'thit_heo', 'ca_chua', 'hanh_toi'] },
-  { name: 'Cá điêu hồng chiên xù', type: 'main', calories: 360, cost: 55000, ingredients: ['ca_dieu_hong', 'hanh_toi'] },
-  { name: 'Tôm rim tỏi', type: 'main', calories: 280, cost: 65000, ingredients: ['tom', 'hanh_toi'] },
-  
-  { name: 'Canh rau muống luộc', type: 'soup', calories: 80, cost: 10000, ingredients: ['rau_muong'] },
-  { name: 'Canh rau ngót thịt băm', type: 'soup', calories: 150, cost: 20000, ingredients: ['rau_ngot', 'thit_heo', 'hanh_toi'] },
-  { name: 'Canh bí đỏ thịt băm', type: 'soup', calories: 180, cost: 22000, ingredients: ['bi_do', 'thit_heo'] },
-  { name: 'Canh cải ngọt thịt băm', type: 'soup', calories: 120, cost: 18000, ingredients: ['rau_cai_ngot', 'thit_heo'] },
-  { name: 'Canh chua cá lóc', type: 'soup', calories: 220, cost: 45000, ingredients: ['ca_loc', 'ca_chua', 'hanh_toi'] },
-  { name: 'Canh đậu hũ cà chua', type: 'soup', calories: 110, cost: 15000, ingredients: ['dau_hu', 'ca_chua', 'hanh_toi'] }
+export type FoodPreference = 'any' | 'com' | 'bun_pho_my' | 'chao_sup' | 'lau_nuong' | 'mon_cuon' | 'chay';
+
+export interface MealSuggestionRequest {
+  mealType: 'breakfast' | 'lunch' | 'dinner';
+  preference: FoodPreference;
+  familySize: number;
+  availableIngredients: string[];
+  recentMeals: string[];
+}
+
+export interface MealOption extends Meal {
+  description: string;
+}
+
+export interface CalorieEstimate {
+  calories: number;
+  proteinGrams: number;
+  carbsGrams: number;
+  fatGrams: number;
+  note: string;
+}
+
+type RecipeType = 'breakfast' | 'main' | 'soup' | 'hotpot';
+
+const MOCK_RECIPES: {
+  name: string;
+  type: RecipeType;
+  pref: FoodPreference;
+  calories: number;
+  cost: number;
+  ingredients: string[];
+}[] = [
+  // Breakfast — bún/phở/mỳ
+  { name: 'Phở bò', type: 'breakfast', pref: 'bun_pho_my', calories: 450, cost: 45000, ingredients: ['thit_bo', 'gao', 'hanh_toi'] },
+  { name: 'Bún sườn heo', type: 'breakfast', pref: 'bun_pho_my', calories: 420, cost: 35000, ingredients: ['thit_heo', 'gao', 'hanh_toi'] },
+  { name: 'Bún bò Huế', type: 'breakfast', pref: 'bun_pho_my', calories: 500, cost: 40000, ingredients: ['thit_bo', 'thit_heo', 'hanh_toi'] },
+  // Breakfast — cháo/súp
+  { name: 'Cháo sườn heo', type: 'breakfast', pref: 'chao_sup', calories: 300, cost: 20000, ingredients: ['thit_heo', 'gao', 'hanh_toi'] },
+  { name: 'Cháo trứng gà', type: 'breakfast', pref: 'chao_sup', calories: 260, cost: 18000, ingredients: ['trung_ga', 'gao', 'hanh_toi'] },
+  { name: 'Cháo cá lóc', type: 'breakfast', pref: 'chao_sup', calories: 280, cost: 30000, ingredients: ['ca_loc', 'gao', 'hanh_toi'] },
+  // Breakfast — cơm (com tấm, etc.)
+  { name: 'Trứng ốp la bánh mì', type: 'breakfast', pref: 'com', calories: 350, cost: 15000, ingredients: ['trung_ga', 'gia_vi'] },
+  { name: 'Bánh mì pate trứng', type: 'breakfast', pref: 'com', calories: 320, cost: 22000, ingredients: ['trung_ga', 'gia_vi'] },
+  { name: 'Cơm tấm sườn trứng', type: 'breakfast', pref: 'com', calories: 580, cost: 40000, ingredients: ['thit_heo', 'trung_ga', 'gao', 'gia_vi'] },
+
+  // Main — cơm
+  { name: 'Thịt kho trứng tộ', type: 'main', pref: 'com', calories: 450, cost: 50000, ingredients: ['thit_heo', 'trung_ga', 'hanh_toi'] },
+  { name: 'Cá lóc kho tộ', type: 'main', pref: 'com', calories: 320, cost: 45000, ingredients: ['ca_loc', 'hanh_toi'] },
+  { name: 'Sườn kho ngũ vị', type: 'main', pref: 'com', calories: 400, cost: 55000, ingredients: ['thit_heo', 'hanh_toi', 'gia_vi'] },
+  { name: 'Bò xào hành cần', type: 'main', pref: 'com', calories: 380, cost: 70000, ingredients: ['thit_bo', 'hanh_toi'] },
+  { name: 'Cá điêu hồng chiên xù', type: 'main', pref: 'com', calories: 360, cost: 55000, ingredients: ['ca_dieu_hong', 'hanh_toi'] },
+  { name: 'Tôm rim tỏi', type: 'main', pref: 'com', calories: 280, cost: 65000, ingredients: ['tom', 'hanh_toi'] },
+  { name: 'Gà chiên mắm', type: 'main', pref: 'com', calories: 420, cost: 60000, ingredients: ['thit_ga', 'hanh_toi', 'gia_vi'] },
+  { name: 'Gà luộc muối tiêu chanh', type: 'main', pref: 'com', calories: 350, cost: 80000, ingredients: ['thit_ga', 'hanh_toi'] },
+  { name: 'Cá điêu hồng hấp gừng hành', type: 'main', pref: 'com', calories: 280, cost: 60000, ingredients: ['ca_dieu_hong', 'hanh_toi', 'gia_vi'] },
+  // Main — bún/phở/mỳ
+  { name: 'Bún thịt nướng', type: 'main', pref: 'bun_pho_my', calories: 480, cost: 45000, ingredients: ['thit_heo', 'gao', 'hanh_toi', 'gia_vi'] },
+  { name: 'Mỳ xào bò', type: 'main', pref: 'bun_pho_my', calories: 520, cost: 55000, ingredients: ['thit_bo', 'hanh_toi', 'gia_vi'] },
+  // Main — cháo/súp
+  { name: 'Canh rau muống luộc', type: 'soup', pref: 'chao_sup', calories: 80, cost: 10000, ingredients: ['rau_muong'] },
+  { name: 'Canh rau ngót thịt băm', type: 'soup', pref: 'chao_sup', calories: 150, cost: 20000, ingredients: ['rau_ngot', 'thit_heo', 'hanh_toi'] },
+  { name: 'Canh bí đỏ thịt băm', type: 'soup', pref: 'chao_sup', calories: 180, cost: 22000, ingredients: ['bi_do', 'thit_heo'] },
+  { name: 'Canh chua cá lóc', type: 'soup', pref: 'chao_sup', calories: 220, cost: 45000, ingredients: ['ca_loc', 'ca_chua', 'hanh_toi'] },
+  { name: 'Canh đậu hũ cà chua', type: 'soup', pref: 'chao_sup', calories: 110, cost: 15000, ingredients: ['dau_hu', 'ca_chua', 'hanh_toi'] },
+  { name: 'Canh mướp hương tôm', type: 'soup', pref: 'chao_sup', calories: 140, cost: 35000, ingredients: ['muop_huong', 'tom', 'hanh_toi'] },
+  // Lẩu/Nướng
+  { name: 'Lẩu thái hải sản', type: 'hotpot', pref: 'lau_nuong', calories: 800, cost: 220000, ingredients: ['tom', 'ca_loc', 'ca_chua', 'hanh_toi', 'gia_vi'] },
+  { name: 'Lẩu gà lá giang', type: 'hotpot', pref: 'lau_nuong', calories: 700, cost: 180000, ingredients: ['thit_ga', 'hanh_toi', 'gia_vi'] },
+  { name: 'Lẩu bò nhúng dấm', type: 'hotpot', pref: 'lau_nuong', calories: 750, cost: 250000, ingredients: ['thit_bo', 'hanh_toi', 'gia_vi'] },
+  { name: 'Thịt nướng sả ớt', type: 'hotpot', pref: 'lau_nuong', calories: 520, cost: 90000, ingredients: ['thit_heo', 'hanh_toi', 'gia_vi'] },
+  // Món cuốn
+  { name: 'Gỏi cuốn tôm thịt', type: 'main', pref: 'mon_cuon', calories: 280, cost: 50000, ingredients: ['tom', 'thit_heo', 'rau_muong', 'gia_vi'] },
+  { name: 'Bánh tráng cuốn thịt heo', type: 'main', pref: 'mon_cuon', calories: 320, cost: 45000, ingredients: ['thit_heo', 'rau_muong', 'gia_vi'] },
+  { name: 'Bò nướng cuốn bánh tráng', type: 'main', pref: 'mon_cuon', calories: 380, cost: 80000, ingredients: ['thit_bo', 'rau_muong', 'gia_vi'] },
+  // Chay
+  { name: 'Đậu hũ sốt me', type: 'main', pref: 'chay', calories: 240, cost: 25000, ingredients: ['dau_hu', 'ca_chua', 'gia_vi'] },
+  { name: 'Canh khổ qua đậu hũ', type: 'soup', pref: 'chay', calories: 120, cost: 20000, ingredients: ['dau_hu', 'gia_vi'] },
+  { name: 'Cơm chiên dương châu chay', type: 'main', pref: 'chay', calories: 480, cost: 30000, ingredients: ['trung_ga', 'gao', 'ca_chua', 'gia_vi'] },
+  { name: 'Rau luộc chấm tương', type: 'soup', pref: 'chay', calories: 90, cost: 15000, ingredients: ['rau_muong', 'gia_vi'] },
 ];
+
+// ─── Existing: generate full day menu ─────────────────────────────────────────
 
 export async function generateDailyMenu(req: SuggestionRequest): Promise<DailyMenuResponse> {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-
-  // Fallback to Smart Mock if API key is not configured or in trial mode
-  if (!apiKey || apiKey === 'mock-gemini-key') {
-    return generateMockMenu(req);
-  }
+  if (!apiKey || apiKey === 'mock-gemini-key') return generateMockMenu(req);
 
   const customIngredients = useFamilyStore.getState().customIngredients || [];
-  const mergedIngredients = customIngredients;
+  const allIngredients = [...DEFAULT_INGREDIENTS, ...customIngredients];
 
   const prompt = `
-Bạn là một chuyên gia dinh dưỡng Việt Nam. Thiết kế thực đơn ăn uống cho một gia đình đáp ứng các điều kiện:
-1. Tổng nhu cầu Calo đề xuất: ${req.dailyCalorieTarget} Kcal.
-2. Ngân sách tối đa tiền thức ăn: ${req.budgetLimit} đ.
-3. CHỈ được phép dùng các nguyên liệu khả dụng sau: [${req.availableIngredients.map(id => mergedIngredients.find(i => i.id === id)?.name || id).join(', ')}].
-4. Tránh lặp các món ăn gần đây: [${req.recentMeals.join(', ')}].
+Bạn là chuyên gia dinh dưỡng Việt Nam. Thiết kế thực đơn 3 bữa trong ngày, đáp ứng:
+1. Nhu cầu Calo MỖI NGƯỜI: ${req.dailyCalorieTarget} Kcal/ngày. Tổng calories các món phải gần mức này.
+2. CHỈ dùng nguyên liệu: [${req.availableIngredients.map(id => allIngredients.find(i => i.id === id)?.name || id).join(', ')}].
+3. Tránh lặp: [${req.recentMeals.slice(0, 15).join(', ')}].
 
-Trả về kết quả ở định dạng JSON duy nhất khớp với cấu trúc sau, không kèm theo giải thích markdown hay ký tự thừa:
+QUAN TRỌNG: calories mỗi món = Kcal CHO 1 NGƯỜI (1 khẩu phần). Ví dụ: cháo/canh 80-200, phở/bún 400-550, cơm tấm 500-650, kho/chiên 300-450.
+totalDayCalories = tổng calories/người cả ngày (phải gần ${req.dailyCalorieTarget}).
+
+JSON duy nhất, không markdown:
 {
   "meals": {
-    "breakfast": [{"recipeName": "Tên món ăn", "calories": 400, "estimatedCost": 30000, "ingredientsUsed": ["trung_ga"]}],
-    "lunch": [{"recipeName": "Món mặn", "calories": 450, "estimatedCost": 50000, "ingredientsUsed": ["thit_heo"]}, {"recipeName": "Món canh", "calories": 150, "estimatedCost": 15000, "ingredientsUsed": ["rau_muong"]}],
-    "dinner": [{"recipeName": "Món cá", "calories": 400, "estimatedCost": 45000, "ingredientsUsed": ["ca_loc", "ca_chua"]}]
+    "breakfast": [{"recipeName": "Tên món", "calories": 350, "estimatedCost": 0, "ingredientsUsed": ["trung_ga"]}],
+    "lunch": [{"recipeName": "Món mặn", "calories": 420, "estimatedCost": 0, "ingredientsUsed": ["thit_heo"]}, {"recipeName": "Canh rau", "calories": 80, "estimatedCost": 0, "ingredientsUsed": ["rau_muong"]}],
+    "dinner": [{"recipeName": "Món cá", "calories": 380, "estimatedCost": 0, "ingredientsUsed": ["ca_loc"]}, {"recipeName": "Canh bí", "calories": 100, "estimatedCost": 0, "ingredientsUsed": ["bi_do"]}]
   },
-  "totalDayCalories": 1400,
-  "estimatedTotalCost": 140000,
-  "nutritionSummary": {"proteinGrams": 80, "carbsGrams": 180, "fatGrams": 40},
-  "healthNote": "Lời khuyên dinh dưỡng ngắn cho mẹ"
+  "totalDayCalories": 1330,
+  "estimatedTotalCost": 0,
+  "nutritionSummary": {"proteinGrams": 65, "carbsGrams": 160, "fatGrams": 45},
+  "healthNote": "Lời khuyên dinh dưỡng 1 câu"
 }
 `;
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            responseMimeType: 'application/json'
-          }
+          generationConfig: { responseMimeType: 'application/json' }
         })
       }
     );
-
     const json = await response.json();
     const textResult = json.candidates[0].content.parts[0].text;
     return JSON.parse(textResult) as DailyMenuResponse;
@@ -110,87 +164,244 @@ Trả về kết quả ở định dạng JSON duy nhất khớp với cấu tr�
   }
 }
 
-// Smart Mock Generator logic to ensure app works off-grid or without keys
-function generateMockMenu(req: SuggestionRequest): DailyMenuResponse {
-  const avail = req.availableIngredients.length > 0 ? req.availableIngredients : ['thit_heo', 'trung_ga', 'rau_muong', 'gao', 'gia_vi', 'hanh_toi'];
-  
-  // Filter mock recipes by matching at least one available ingredient (or basic ones)
-  const isAvailable = (rec: typeof MOCK_RECIPES[0]) => {
-    return rec.ingredients.every(ingId => avail.includes(ingId));
+// ─── New: suggest individual meal options ─────────────────────────────────────
+
+export async function generateMealSuggestions(req: MealSuggestionRequest): Promise<MealOption[]> {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'mock-gemini-key') return generateMockMealSuggestions(req);
+
+  const customIngredients = useFamilyStore.getState().customIngredients || [];
+  const allIngredients = [...DEFAULT_INGREDIENTS, ...customIngredients];
+  const ingName = (id: string) => allIngredients.find(i => i.id === id)?.name || id;
+
+  const mealTypeVN = req.mealType === 'breakfast' ? 'bữa sáng' : req.mealType === 'lunch' ? 'bữa trưa' : 'bữa tối';
+  const prefVN: Record<FoodPreference, string> = {
+    any: 'bất kỳ',
+    com: 'cơm (món ăn kèm cơm, chiên, xào, kho, nướng...)',
+    bun_pho_my: 'bún / phở / mỳ / hủ tiếu / bánh canh/ cháo mỳ',
+    chao_sup: 'cháo / súp / canh',
+    lau_nuong: 'lẩu / nướng / BBQ',
+    mon_cuon: 'món cuốn (gỏi cuốn, bánh tráng cuốn)',
+    chay: 'món chay (không thịt, đậu hũ, nấm, rau củ)',
   };
+
+  const prompt = `
+Bạn là chuyên gia dinh dưỡng Việt Nam. Gợi ý 3 món ăn cho ${mealTypeVN} của gia đình ${req.familySize} người.
+Loại món ưu tiên: ${prefVN[req.preference]}.
+Nguyên liệu có sẵn: [${req.availableIngredients.map(ingName).join(', ')}].
+Tránh trùng: [${req.recentMeals.slice(0, 10).join(', ')}].
+
+YÊU CẦU: calories = Kcal CHO 1 NGƯỜI ĂN (1 khẩu phần). Mức tham khảo: cháo/canh ≈ 80-200, phở/bún ≈ 400-550, cơm tấm/cơm chiên ≈ 500-650, kho/chiên/xào ≈ 300-450, lẩu ≈ 600-800.
+description: 1 câu mô tả ngắn, hấp dẫn.
+
+JSON array, không markdown:
+[{"recipeName":"Tên món","calories":450,"estimatedCost":0,"ingredientsUsed":["id1"],"description":"Mô tả ngắn"}]
+`;
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      }
+    );
+    const json = await response.json();
+    const textResult = json.candidates[0].content.parts[0].text;
+    return JSON.parse(textResult) as MealOption[];
+  } catch (err) {
+    console.error("Meal suggestion API failed:", err);
+    return generateMockMealSuggestions(req);
+  }
+}
+
+// ─── New: estimate calories for a manually-entered dish ──────────────────────
+
+export async function estimateDishCalories(dishName: string): Promise<CalorieEstimate> {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'mock-gemini-key') return estimateCaloriesMock(dishName);
+
+  const prompt = `
+Tính thành phần dinh dưỡng cho món "${dishName}" CHO 1 NGƯỜI ĂN (1 khẩu phần bình thường).
+Dựa theo công thức nấu ăn Việt Nam truyền thống.
+
+Trả JSON (không markdown):
+{"calories":450,"proteinGrams":25,"carbsGrams":50,"fatGrams":15,"note":"Nhận xét dinh dưỡng 1 câu"}
+`;
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      }
+    );
+    const json = await response.json();
+    const textResult = json.candidates[0].content.parts[0].text;
+    return JSON.parse(textResult) as CalorieEstimate;
+  } catch (err) {
+    console.error("Calorie estimate API failed:", err);
+    return estimateCaloriesMock(dishName);
+  }
+}
+
+// ─── New: quick cooking guide for a dish ─────────────────────────────────────
+
+export async function getCookingGuide(dishName: string): Promise<string> {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'mock-gemini-key') return getCookingGuideMock(dishName);
+
+  const prompt = `Hướng dẫn nấu món "${dishName}" kiểu gia đình Việt, tối đa 150 chữ, theo đúng format sau (giữ nguyên dấu **):
+**Nguyên liệu:** [liệt kê ngắn các nguyên liệu cần nấu, cách nhau bằng dấu phẩy]
+**Cách làm:** [3-4 bước ngắn, mỗi bước 1 câu]
+**Mẹo:** [1 mẹo nhỏ hữu ích]
+Không thêm bất kỳ nội dung nào ngoài format trên.`;
+
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    );
+    const json = await response.json();
+    return json.candidates[0].content.parts[0].text as string;
+  } catch (err) {
+    console.error('Cooking guide API failed:', err);
+    return getCookingGuideMock(dishName);
+  }
+}
+
+// ─── Mock implementations ─────────────────────────────────────────────────────
+
+function generateMockMenu(req: SuggestionRequest): DailyMenuResponse {
+  const avail = req.availableIngredients.length > 0
+    ? req.availableIngredients
+    : ['thit_heo', 'trung_ga', 'rau_muong', 'gao', 'gia_vi', 'hanh_toi'];
+
+  const isAvailable = (rec: typeof MOCK_RECIPES[0]) =>
+    rec.ingredients.every(ingId => avail.includes(ingId));
 
   const breakfastOptions = MOCK_RECIPES.filter(r => r.type === 'breakfast' && isAvailable(r));
   const mainOptions = MOCK_RECIPES.filter(r => r.type === 'main' && isAvailable(r));
   const soupOptions = MOCK_RECIPES.filter(r => r.type === 'soup' && isAvailable(r));
 
-  // Defaults fallback if pantry filter is too strict
-  const breakfast = breakfastOptions.length > 0 
-    ? breakfastOptions[Math.floor(Math.random() * breakfastOptions.length)] 
-    : MOCK_RECIPES[2]; // Trứng ốp la
+  const breakfast = breakfastOptions.length > 0
+    ? breakfastOptions[Math.floor(Math.random() * breakfastOptions.length)]
+    : MOCK_RECIPES.find(r => r.name === 'Trứng ốp la bánh mì')!;
 
-  const lunchMain = mainOptions.length > 0 
-    ? mainOptions[Math.floor(Math.random() * mainOptions.length)] 
-    : MOCK_RECIPES[4]; // Thịt kho trứng
-  const lunchSoup = soupOptions.length > 0 
-    ? soupOptions[Math.floor(Math.random() * soupOptions.length)] 
-    : MOCK_RECIPES[10]; // Canh rau muống
+  const lunchMain = mainOptions.length > 0
+    ? mainOptions[Math.floor(Math.random() * mainOptions.length)]
+    : MOCK_RECIPES.find(r => r.name === 'Thịt kho trứng tộ')!;
+  const lunchSoup = soupOptions.length > 0
+    ? soupOptions[Math.floor(Math.random() * soupOptions.length)]
+    : MOCK_RECIPES.find(r => r.name === 'Canh rau muống luộc')!;
 
-  // Ensure dinner is not exact duplicate
-  let dinnerMain = mainOptions.length > 1
-    ? mainOptions.filter(m => m.name !== lunchMain.name)[0]
-    : mainOptions[0] || MOCK_RECIPES[6]; // Cá lóc kho tộ
-  if (!dinnerMain) dinnerMain = MOCK_RECIPES[6];
+  let dinnerMain = mainOptions.filter(m => m.name !== lunchMain.name)[0] || lunchMain;
+  const dinnerSoup = soupOptions.filter(s => s.name !== lunchSoup.name)[0] || lunchSoup;
 
-  const dinnerSoup = soupOptions.length > 1
-    ? soupOptions.filter(s => s.name !== lunchSoup.name)[0]
-    : soupOptions[0] || MOCK_RECIPES[11]; // Canh rau ngót
-  
-  const response: DailyMenuResponse = {
+  return {
     meals: {
-      breakfast: [{
-        recipeName: breakfast.name,
-        calories: breakfast.calories,
-        estimatedCost: breakfast.cost,
-        ingredientsUsed: breakfast.ingredients
-      }],
+      breakfast: [{ recipeName: breakfast.name, calories: breakfast.calories, estimatedCost: 0, ingredientsUsed: breakfast.ingredients }],
       lunch: [
-        {
-          recipeName: lunchMain.name,
-          calories: lunchMain.calories,
-          estimatedCost: lunchMain.cost,
-          ingredientsUsed: lunchMain.ingredients
-        },
-        {
-          recipeName: lunchSoup.name,
-          calories: lunchSoup.calories,
-          estimatedCost: lunchSoup.cost,
-          ingredientsUsed: lunchSoup.ingredients
-        }
+        { recipeName: lunchMain.name, calories: lunchMain.calories, estimatedCost: 0, ingredientsUsed: lunchMain.ingredients },
+        { recipeName: lunchSoup.name, calories: lunchSoup.calories, estimatedCost: 0, ingredientsUsed: lunchSoup.ingredients },
       ],
       dinner: [
-        {
-          recipeName: dinnerMain.name,
-          calories: dinnerMain.calories,
-          estimatedCost: dinnerMain.cost,
-          ingredientsUsed: dinnerMain.ingredients
-        },
-        {
-          recipeName: dinnerSoup.name,
-          calories: dinnerSoup.calories,
-          estimatedCost: dinnerSoup.cost,
-          ingredientsUsed: dinnerSoup.ingredients
-        }
-      ]
+        { recipeName: dinnerMain.name, calories: dinnerMain.calories, estimatedCost: 0, ingredientsUsed: dinnerMain.ingredients },
+        { recipeName: dinnerSoup.name, calories: dinnerSoup.calories, estimatedCost: 0, ingredientsUsed: dinnerSoup.ingredients },
+      ],
     },
     totalDayCalories: breakfast.calories + lunchMain.calories + lunchSoup.calories + dinnerMain.calories + dinnerSoup.calories,
-    estimatedTotalCost: breakfast.cost + lunchMain.cost + lunchSoup.cost + dinnerMain.cost + dinnerSoup.cost,
+    estimatedTotalCost: 0,
     nutritionSummary: {
       proteinGrams: Math.round((req.dailyCalorieTarget * 0.20) / 4),
       carbsGrams: Math.round((req.dailyCalorieTarget * 0.55) / 4),
-      fatGrams: Math.round((req.dailyCalorieTarget * 0.25) / 9)
+      fatGrams: Math.round((req.dailyCalorieTarget * 0.25) / 9),
     },
-    healthNote: "Thực đơn dinh dưỡng phong cách đồng quê phù hợp với nguyên liệu sẵn có gần nhà."
+    healthNote: 'Thực đơn dinh dưỡng cân bằng phù hợp với nguyên liệu sẵn có.',
+  };
+}
+
+function generateMockMealSuggestions(req: MealSuggestionRequest): MealOption[] {
+  const avail = req.availableIngredients.length > 0
+    ? req.availableIngredients
+    : ['thit_heo', 'trung_ga', 'rau_muong', 'gao', 'gia_vi', 'hanh_toi'];
+
+  const typeFilter: RecipeType[] = req.mealType === 'breakfast'
+    ? ['breakfast']
+    : ['main', 'soup', 'hotpot'];
+
+  let candidates = MOCK_RECIPES.filter(r => typeFilter.includes(r.type));
+
+  if (req.preference !== 'any') {
+    const prefFiltered = candidates.filter(r => r.pref === req.preference);
+    if (prefFiltered.length >= 2) candidates = prefFiltered;
+  }
+
+  const ingFiltered = candidates.filter(r => r.ingredients.some(ing => avail.includes(ing)));
+  if (ingFiltered.length >= 2) candidates = ingFiltered;
+
+  const notRecent = candidates.filter(r => !req.recentMeals.includes(r.name));
+  if (notRecent.length >= 2) candidates = notRecent;
+
+  // Shuffle using a simple stable sort with seeded-ish variation
+  const shuffled = [...candidates].sort(() => (Math.random() > 0.5 ? 1 : -1)).slice(0, 3);
+
+  const prefLabels: Record<FoodPreference, string> = {
+    any: 'ngon', com: 'cơm', bun_pho_my: 'bún/phở/mỳ',
+    chao_sup: 'cháo/súp', lau_nuong: 'lẩu/nướng', mon_cuon: 'cuốn', chay: 'chay',
   };
 
-  return response;
+  return shuffled.map(r => ({
+    recipeName: r.name,
+    calories: r.calories,
+    estimatedCost: 0,
+    ingredientsUsed: r.ingredients,
+    description: `Món ${prefLabels[r.pref]} truyền thống, dễ nấu tại nhà`,
+  }));
+}
+
+function getCookingGuideMock(dishName: string): string {
+  return `**Nguyên liệu:** ${dishName.includes('cá') ? 'cá tươi, hành tỏi, gia vị (nước mắm, đường, tiêu)' : dishName.includes('canh') ? 'rau củ, thịt băm, hành lá, gia vị' : 'nguyên liệu chính, hành tỏi, nước mắm, đường, tiêu'}
+**Cách làm:** Sơ chế nguyên liệu, rửa sạch. Phi thơm hành tỏi với dầu ăn. Cho nguyên liệu chính vào, đảo đều. Nêm gia vị vừa miệng, nấu đến khi chín mềm.
+**Mẹo:** Ướp nguyên liệu 15 phút trước khi nấu để thấm gia vị, món sẽ đậm đà hơn.`;
+}
+
+function estimateCaloriesMock(dishName: string): CalorieEstimate {
+  const n = dishName.toLowerCase();
+  let cal = 300;
+
+  if (n.includes('lẩu')) cal = 650;
+  else if (n.includes('cơm tấm') || n.includes('cơm chiên') || n.includes('cơm rang')) cal = 600;
+  else if (n.includes('phở') || n.includes('bún bò') || n.includes('bún riêu')) cal = 500;
+  else if (n.includes('bún') || n.includes('hủ tiếu') || n.includes('mì')) cal = 450;
+  else if (n.includes('cháo')) cal = 260;
+  else if (n.includes('bánh mì')) cal = 380;
+  else if (n.includes('canh') || n.includes('súp')) cal = 130;
+  else if (n.includes('kho') || n.includes('rim')) cal = 390;
+  else if (n.includes('chiên') || n.includes('rán')) cal = 420;
+  else if (n.includes('xào')) cal = 360;
+  else if (n.includes('hấp') || n.includes('luộc')) cal = 270;
+  else if (n.includes('gỏi') || n.includes('salad')) cal = 180;
+  else if (n.includes('trứng')) cal = 280;
+
+  return {
+    calories: cal,
+    proteinGrams: Math.round(cal * 0.20 / 4),
+    carbsGrams: Math.round(cal * 0.50 / 4),
+    fatGrams: Math.round(cal * 0.30 / 9),
+    note: `Ước tính ~${cal} Kcal/người (1 khẩu phần)`,
+  };
 }
