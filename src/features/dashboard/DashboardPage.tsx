@@ -1,0 +1,940 @@
+import { useState, useEffect, useMemo } from 'react';
+import { useConfirm } from '../../components/ConfirmDialog';
+import { useFamilyStore } from '../../stores/familyStore';
+import { useAuthStore } from '../../stores/authStore';
+import type { Budget, Transaction } from '../../types';
+import { getMergedCategories } from '../../core/constants';
+import { Plus, Wallet as WalletIcon, TrendingDown, TrendingUp, AlertTriangle, Trash2, PiggyBank, ArrowRightLeft, ChevronRight, ArrowLeft, Search, MoreVertical } from 'lucide-react';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
+import { format } from 'date-fns';
+import TransactionModal from '../budget/TransactionModal';
+import PullToRefresh from '../../components/PullToRefresh';
+
+export default function DashboardPage() {
+  const { user } = useAuthStore();
+  const confirm = useConfirm();
+  const { 
+    family, 
+    wallets, 
+    transactions, 
+    budgets, 
+    createWallet, 
+    deleteTransaction,
+    saveBudget,
+    customCategories
+  } = useFamilyStore();
+
+  const mergedCategories = getMergedCategories(customCategories);
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [newBudgetCategory, setNewBudgetCategory] = useState('Đi chợ / Ăn uống');
+  const [newBudgetLimit, setNewBudgetLimit] = useState(5000000);
+  const [showAddBudget, setShowAddBudget] = useState(false);
+  const [view, setView] = useState<'main' | 'history' | 'wallet_detail'>('main');
+  const [selectedWalletIdForDetail, setSelectedWalletIdForDetail] = useState<string | null>(null);
+  const [walletPeriod, setWalletPeriod] = useState<30 | 90 | 365>(30);
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+
+  // Initialize trial wallets if empty
+  useEffect(() => {
+    if (user && wallets.length === 0) {
+      const initWallets = async () => {
+        await createWallet(user.uid, {
+          walletId: 'cash_wallet',
+          name: 'Tiền mặt (Ví tay)',
+          type: 'cash',
+          balance: 3000000,
+          colorCode: '#FF8C69',
+          iconName: 'Coins'
+        });
+        await createWallet(user.uid, {
+          walletId: 'bank_wallet',
+          name: 'Techcombank (Thẻ)',
+          type: 'bank',
+          balance: 12000000,
+          colorCode: '#4EA8DE',
+          iconName: 'CreditCard'
+        });
+      };
+      initWallets();
+    }
+  }, [user, wallets]);
+
+  // Initial dummy budgets if empty
+  useEffect(() => {
+    if (user && budgets.length === 0) {
+      const initBudgets = async () => {
+        await saveBudget(user.uid, {
+          budgetId: 'budget_food',
+          category: 'Đi chợ / Ăn uống',
+          limitAmount: 6000000,
+          spentAmount: 0,
+          period: 'monthly',
+          startDate: new Date(),
+          endDate: new Date(),
+          alertThreshold: 0.8,
+          isAlerted: false
+        });
+      };
+      initBudgets();
+    }
+  }, [user, budgets]);
+
+  // Calculate totals
+  const totalBalance = wallets.reduce((sum, w) => sum + w.balance, 0);
+  
+  const totalIncome = transactions
+    .filter(t => t.type === 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  const totalExpense = transactions
+    .filter(t => t.type === 'expense')
+    .reduce((sum, t) => sum + t.amount, 0);
+
+  // Dynamic budget calculation based on current transactions of the month
+  const getCategorySpent = (categoryName: string) => {
+    return transactions
+      .filter(t => t.type === 'expense' && t.category === categoryName)
+      .reduce((sum, t) => sum + t.amount, 0);
+  };
+
+  const handleAddBudget = async () => {
+    if (!user) return;
+    const newB: Budget = {
+      budgetId: 'budget_' + Date.now().toString(),
+      category: newBudgetCategory,
+      limitAmount: newBudgetLimit,
+      spentAmount: 0,
+      period: 'monthly',
+      startDate: new Date(),
+      endDate: new Date(),
+      alertThreshold: 0.8,
+      isAlerted: false
+    };
+    await saveBudget(user.uid, newB);
+    setShowAddBudget(false);
+  };
+
+
+  const handleDeleteTx = async (tx: Transaction) => {
+    if (!user) return;
+    const yes = await confirm({
+      title: 'Xóa giao dịch',
+      message: 'Bạn có chắc chắn muốn xóa giao dịch này? Số dư ví sẽ được tự động cập nhật lại.',
+      confirmText: 'Xóa',
+      variant: 'danger'
+    });
+    if (yes) {
+      await deleteTransaction(user.uid, tx);
+    }
+  };
+
+  const filteredTransactions = transactions.filter(t => {
+    const matchesSearch = 
+      t.note.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      t.category.toLowerCase().includes(searchTerm.toLowerCase());
+      
+    if (!matchesSearch) return false;
+    
+    if (dateFilter === 'all') return true;
+    
+    const txDate = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+    const now = new Date();
+    
+    if (dateFilter === 'today') {
+      return (
+        txDate.getDate() === now.getDate() &&
+        txDate.getMonth() === now.getMonth() &&
+        txDate.getFullYear() === now.getFullYear()
+      );
+    }
+    
+    if (dateFilter === 'week') {
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(now.getDate() - 7);
+      return txDate >= oneWeekAgo;
+    }
+    
+    if (dateFilter === 'month') {
+      return (
+        txDate.getMonth() === now.getMonth() &&
+        txDate.getFullYear() === now.getFullYear()
+      );
+    }
+    
+    return true;
+  });
+
+  const sortedFilteredTransactions = useMemo(() => {
+    return [...filteredTransactions].sort((a, b) => {
+      const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+      const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+      return dateB.getTime() - dateA.getTime();
+    });
+  }, [filteredTransactions]);
+
+  const handleRefresh = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  };
+
+  // Chart Data preparation
+  const categorySummary: { [key: string]: number } = {};
+  transactions
+    .filter(t => t.type === 'expense')
+    .forEach(t => {
+      categorySummary[t.category] = (categorySummary[t.category] || 0) + t.amount;
+    });
+
+  const chartData = Object.keys(categorySummary).map(catName => {
+    const catMeta = mergedCategories.find(c => c.name === catName);
+    return {
+      name: catName.split('/')[0].trim(),
+      value: categorySummary[catName],
+      color: catMeta?.color || '#FF8C69'
+    };
+  });
+
+  const selectedWallet = wallets.find(w => w.walletId === selectedWalletIdForDetail);
+  
+  const walletTransactions = useMemo(() => {
+    if (!selectedWalletIdForDetail) return [];
+    const now = new Date();
+    const startDate = new Date();
+    startDate.setDate(now.getDate() - walletPeriod);
+    
+    return transactions.filter(t => {
+      const txDate = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      const isWithinPeriod = txDate >= startDate;
+      const isRelated = t.walletId === selectedWalletIdForDetail || t.toWalletId === selectedWalletIdForDetail;
+      return isRelated && isWithinPeriod;
+    });
+  }, [transactions, selectedWalletIdForDetail, walletPeriod]);
+
+  const walletIncome = useMemo(() => {
+    return walletTransactions
+      .filter(t => (t.walletId === selectedWalletIdForDetail && t.type === 'income') || (t.toWalletId === selectedWalletIdForDetail && t.type === 'transfer'))
+      .reduce((sum, t) => sum + t.amount, 0);
+  }, [walletTransactions, selectedWalletIdForDetail]);
+
+  const walletExpense = useMemo(() => {
+    return walletTransactions
+      .filter(t => (t.walletId === selectedWalletIdForDetail && t.type === 'expense') || (t.walletId === selectedWalletIdForDetail && t.type === 'transfer'))
+      .reduce((sum, t) => sum + t.amount, 0);
+  }, [walletTransactions, selectedWalletIdForDetail]);
+
+  const runningBalances = useMemo(() => {
+    if (!selectedWalletIdForDetail || !selectedWallet) return {};
+    
+    const allWalletTransactionsSorted = [...transactions]
+      .filter(t => t.walletId === selectedWalletIdForDetail || t.toWalletId === selectedWalletIdForDetail)
+      .sort((a, b) => {
+        const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+        const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+        return dateB.getTime() - dateA.getTime(); // newest first
+      });
+
+    const balances: { [txId: string]: number } = {};
+    let tempBalance = selectedWallet.balance;
+
+    allWalletTransactionsSorted.forEach(t => {
+      balances[t.transactionId] = tempBalance;
+      const isIncrease = (t.walletId === selectedWalletIdForDetail && t.type === 'income') || 
+                         (t.toWalletId === selectedWalletIdForDetail && t.type === 'transfer');
+      if (isIncrease) {
+        tempBalance -= t.amount;
+      } else {
+        tempBalance += t.amount;
+      }
+    });
+
+    return balances;
+  }, [transactions, selectedWalletIdForDetail, selectedWallet]);
+
+  // Group transactions by date for selected wallet
+  const groupedWalletTransactions = useMemo(() => {
+    const sorted = [...walletTransactions].sort((a, b) => {
+      const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+      const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+      return dateB.getTime() - dateA.getTime();
+    });
+
+    const groups: { [dateStr: string]: Transaction[] } = {};
+    sorted.forEach(t => {
+      const date = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      const dateStr = format(date, 'yyyy-MM-dd');
+      groups[dateStr] = groups[dateStr] || [];
+      groups[dateStr].push(t);
+    });
+    return groups;
+  }, [walletTransactions]);
+
+  const getDailyNetChange = (groupTxs: Transaction[]) => {
+    let change = 0;
+    groupTxs.forEach(t => {
+      const isIncrease = (t.walletId === selectedWalletIdForDetail && t.type === 'income') || 
+                         (t.toWalletId === selectedWalletIdForDetail && t.type === 'transfer');
+      if (isIncrease) {
+        change += t.amount;
+      } else {
+        change -= t.amount;
+      }
+    });
+    return change;
+  };
+
+  const getWeekdayName = (date: Date) => {
+    const days = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+    return days[date.getDay()];
+  };
+
+  const getFormattedDateHeader = (dateStr: string) => {
+    const date = new Date(dateStr);
+    const now = new Date();
+    const todayStr = format(now, 'yyyy-MM-dd');
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    const yesterdayStr = format(yesterday, 'yyyy-MM-dd');
+
+    const formattedDate = format(date, 'dd/MM/yyyy');
+    if (dateStr === todayStr) {
+      return `${formattedDate} Hôm nay`;
+    } else if (dateStr === yesterdayStr) {
+      return `${formattedDate} Hôm qua`;
+    } else {
+      return `${formattedDate} ${getWeekdayName(date)}`;
+    }
+  };
+
+  const renderTransactionRow = (t: Transaction, isWalletDetailView: boolean) => {
+    const catMeta = mergedCategories.find(c => c.name === t.category);
+    const IconComponent = catMeta?.icon || (t.type === 'expense' ? TrendingDown : t.type === 'income' ? TrendingUp : ArrowRightLeft);
+
+    let amountColor = 'var(--text-primary)';
+    let amountPrefix = '';
+    let showRunningBalance = false;
+    let runBal = 0;
+
+    if (isWalletDetailView) {
+      const isExpenseForWallet = (t.walletId === selectedWalletIdForDetail && t.type === 'expense') || 
+                                 (t.walletId === selectedWalletIdForDetail && t.type === 'transfer');
+      amountColor = isExpenseForWallet ? 'var(--danger)' : 'var(--secondary)';
+      amountPrefix = isExpenseForWallet ? '-' : '+';
+      showRunningBalance = true;
+      runBal = runningBalances[t.transactionId] ?? selectedWallet?.balance ?? 0;
+    } else {
+      if (t.type === 'expense') {
+        amountColor = 'var(--danger)';
+        amountPrefix = '-';
+      } else if (t.type === 'income') {
+        amountColor = 'var(--secondary)';
+        amountPrefix = '+';
+      } else if (t.type === 'transfer') {
+        amountColor = '#718096';
+        amountPrefix = '';
+      }
+    }
+
+    const date = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+    const formattedDate = format(date, 'dd/MM/yyyy');
+
+    let subtitleParts = [];
+    if (!isWalletDetailView) {
+      subtitleParts.push(t.category);
+      subtitleParts.push(formattedDate);
+    } else {
+      if (t.note) {
+        subtitleParts.push(t.category);
+      }
+    }
+
+    if (t.type === 'transfer' && !isWalletDetailView) {
+      const fromW = wallets.find(w => w.walletId === t.walletId);
+      const toW = wallets.find(w => w.walletId === t.toWalletId);
+      if (fromW || toW) {
+        const fromName = fromW ? fromW.name.split(' ')[0] : 'Ví cũ';
+        const toName = toW ? toW.name.split(' ')[0] : 'Ví mới';
+        subtitleParts[0] = `${fromName} ➔ ${toName}`;
+      }
+    }
+
+    if (t.spentBy) {
+      subtitleParts.push(`bởi ${t.spentBy}`);
+    }
+
+    const subtitleText = subtitleParts.join(' • ');
+
+    return (
+      <div
+        key={t.transactionId}
+        onClick={() => {
+          setSelectedTransaction(t);
+          setModalOpen(true);
+        }}
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '12px 16px',
+          backgroundColor: 'var(--bg-card)',
+          borderRadius: 'var(--border-radius-md)',
+          border: '1px solid var(--border)',
+          cursor: 'pointer',
+          boxShadow: 'var(--shadow-sm)',
+          transition: 'all 0.15s ease',
+          margin: 0
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '10px',
+            backgroundColor: catMeta ? `${catMeta.color}15` : (t.type === 'expense' ? 'var(--primary-bg)' : 'var(--secondary-bg)'),
+            color: catMeta?.color || (t.type === 'expense' ? 'var(--primary)' : 'var(--secondary)'),
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <IconComponent size={20} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {t.note || t.category}
+            </span>
+            {subtitleText && (
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: '2px' }}>
+                {subtitleText}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+            <span style={{ fontWeight: 700, fontSize: '15px', color: amountColor }}>
+              {amountPrefix}{t.amount.toLocaleString('vi-VN')} đ
+            </span>
+            {showRunningBalance && (
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                ({runBal.toLocaleString('vi-VN')} đ)
+              </span>
+            )}
+          </div>
+          
+          {!isWalletDetailView && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteTx(t);
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                padding: '6px',
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'background-color 0.2s ease'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 0, 0, 0.05)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <>
+      <PullToRefresh key={view} onRefresh={handleRefresh}>
+        {view === 'main' ? (
+          <>
+            {/* Upper header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <div>
+                <h2 style={{ fontSize: '20px' }}>Chào Mẹ, {family?.familyName}!</h2>
+                <p style={{ fontSize: '12px' }}>Hôm nay là {new Date().toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              </div>
+              <button
+                onClick={() => setModalOpen(true)}
+                className="btn btn-primary"
+                style={{
+                  width: '44px',
+                  height: '44px',
+                  padding: 0,
+                  borderRadius: '50%',
+                  boxShadow: 'var(--shadow-md)'
+                }}
+              >
+                <Plus size={24} />
+              </button>
+            </div>
+
+            {/* Balance Widget Card */}
+            <div className="card" style={{
+              background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)',
+              color: 'white',
+              border: 'none',
+              position: 'relative',
+              overflow: 'hidden'
+            }}>
+              <div style={{ opacity: 0.1, position: 'absolute', right: '-20px', bottom: '-20px' }}>
+                <WalletIcon size={120} />
+              </div>
+              
+              <div style={{ fontSize: '13px', fontWeight: 600, opacity: 0.9 }}>Tổng số dư khả dụng</div>
+              <div style={{ fontSize: '28px', fontWeight: 800, margin: '8px 0 16px' }}>{totalBalance.toLocaleString('vi-VN')} đ</div>
+              
+              <div style={{ display: 'flex', gap: '20px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '12px' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '11px', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '4px' }}><TrendingUp size={12} /> Tổng thu</div>
+                  <div style={{ fontSize: '15px', fontWeight: 700 }}>+{totalIncome.toLocaleString('vi-VN')}đ</div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '11px', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '4px' }}><TrendingDown size={12} /> Tổng chi</div>
+                  <div style={{ fontSize: '15px', fontWeight: 700 }}>-{totalExpense.toLocaleString('vi-VN')}đ</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Wallets detail */}
+            <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px', marginBottom: '20px' }}>
+              {wallets.map(w => (
+                <div 
+                  key={w.walletId} 
+                  className="card" 
+                  onClick={() => {
+                    setSelectedWalletIdForDetail(w.walletId);
+                    setView('wallet_detail');
+                  }}
+                  style={{
+                    margin: 0,
+                    flex: '0 0 160px',
+                    padding: '12px',
+                    borderColor: w.colorCode,
+                    borderWidth: '2px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '8px',
+                      backgroundColor: `${w.colorCode}22`,
+                      color: w.colorCode,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      <PiggyBank size={18} />
+                    </div>
+                    <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>{w.name.split(' ')[0]}</span>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>Số dư</div>
+                    <div style={{ fontSize: '14px', fontWeight: 800 }}>{w.balance.toLocaleString('vi-VN')}đ</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Budget Alerts Section */}
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                <h3 style={{ fontSize: '16px' }}>Hạn mức Chi tiêu</h3>
+                <button
+                  onClick={() => setShowAddBudget(!showAddBudget)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--primary)',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {showAddBudget ? 'Hủy' : '+ Cài hạn mức'}
+                </button>
+              </div>
+
+              {showAddBudget && (
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label>Chọn danh mục</label>
+                    <select className="form-control" value={newBudgetCategory} onChange={(e) => setNewBudgetCategory(e.target.value)}>
+                      {mergedCategories.filter(c => c.type === 'expense').map(c => (
+                        <option key={c.id} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label>Hạn mức hàng tháng (VND)</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      value={newBudgetLimit}
+                      onChange={(e) => setNewBudgetLimit(parseInt(e.target.value) || 0)}
+                    />
+                  </div>
+                  <button type="button" onClick={handleAddBudget} className="btn btn-primary" style={{ height: '40px' }}>Lưu hạn mức</button>
+                </div>
+              )}
+
+              {budgets.map(b => {
+                const spent = getCategorySpent(b.category);
+                const ratio = b.limitAmount > 0 ? spent / b.limitAmount : 0;
+                let color = 'var(--secondary)';
+                if (ratio >= 0.9) color = 'var(--danger)';
+                else if (ratio >= 0.7) color = 'var(--accent)';
+
+                return (
+                  <div key={b.budgetId} className="card" style={{ marginBottom: '10px', padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
+                      <span>{b.category}</span>
+                      <span>{spent.toLocaleString('vi-VN')} / {b.limitAmount.toLocaleString('vi-VN')} đ</span>
+                    </div>
+                    <div style={{ height: '8px', backgroundColor: 'var(--bg-grey)', borderRadius: '4px', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${Math.min(ratio * 100, 100)}%`, backgroundColor: color, borderRadius: '4px', transition: 'width 0.3s ease' }}></div>
+                    </div>
+                    {ratio >= 0.8 && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--danger)', fontSize: '11px', marginTop: '6px', fontWeight: 600 }}>
+                        <AlertTriangle size={12} />
+                        <span>Cảnh báo: Đã tiêu vượt {(ratio * 100).toFixed(0)}% hạn mức!</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Recharts Analytics Chart */}
+            {chartData.length > 0 && (
+              <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <h3 style={{ fontSize: '15px', alignSelf: 'flex-start', marginBottom: '12px' }}>Cơ cấu Chi tiêu Tháng này</h3>
+                <div style={{ width: '100%', height: '160px' }}>
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                    <PieChart>
+                      <Pie
+                        data={chartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={70}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        {chartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip formatter={(value: any) => `${value.toLocaleString('vi-VN')}đ`} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                {/* Custom Legends */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', width: '100%', marginTop: '8px' }}>
+                  {chartData.map((d, index) => (
+                    <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+                      <div style={{ width: '10px', height: '10px', borderRadius: '2px', backgroundColor: d.color }}></div>
+                      <span style={{ color: 'var(--text-secondary)' }}>{d.name}: <strong>{d.value.toLocaleString('vi-VN')}đ</strong></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Quick Access to History Button */}
+            <button
+              type="button"
+              onClick={() => setView('history')}
+              className="card"
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                width: '100%',
+                padding: '16px',
+                cursor: 'pointer',
+                border: '1px solid var(--border)',
+                backgroundColor: 'var(--bg-card)',
+                borderRadius: 'var(--border-radius-md)',
+                textAlign: 'left',
+                marginTop: '16px',
+                marginBottom: '20px',
+                boxShadow: 'var(--shadow-sm)',
+                transition: 'transform 0.15s ease'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  backgroundColor: 'var(--primary-bg)',
+                  color: 'var(--primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <ArrowRightLeft size={20} />
+                </div>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '15px', color: 'var(--text-primary)' }}>Lịch sử giao dịch</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    Xem chi tiết, tìm kiếm và lọc chi tiêu ({transactions.length} giao dịch)
+                  </div>
+                </div>
+              </div>
+              <ChevronRight size={18} style={{ color: 'var(--text-secondary)' }} />
+            </button>
+          </>
+        ) : view === 'history' ? (
+          <>
+            {/* History Header & Back button */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+              <button
+                type="button"
+                onClick={() => setView('main')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-primary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '6px',
+                  borderRadius: '50%',
+                  backgroundColor: 'var(--bg-grey)',
+                  width: '36px',
+                  height: '36px'
+                }}
+              >
+                <ArrowLeft size={18} />
+              </button>
+              <h2 style={{ fontSize: '18px', fontWeight: 800 }}>Lịch sử giao dịch</h2>
+            </div>
+
+            {/* Search & Filter Controls */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Tìm theo ghi chú, danh mục..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{ flex: 1.5, height: '40px', fontSize: '13px' }}
+              />
+              <select
+                className="form-control"
+                value={dateFilter}
+                onChange={(e: any) => setDateFilter(e.target.value)}
+                style={{ flex: 1, height: '40px', fontSize: '13px', padding: '0 8px' }}
+              >
+                <option value="all">Tất cả</option>
+                <option value="today">Hôm nay</option>
+                <option value="week">Tuần này</option>
+                <option value="month">Tháng này</option>
+              </select>
+            </div>
+
+            {/* Transactions list */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingBottom: '20px' }}>
+              {sortedFilteredTransactions.length === 0 ? (
+                <p style={{ textAlign: 'center', padding: '24px', fontSize: '14px', color: 'var(--text-secondary)' }}>Không tìm thấy giao dịch nào phù hợp.</p>
+              ) : (
+                sortedFilteredTransactions.map(t => renderTransactionRow(t, false))
+              )}
+            </div>
+          </>
+        ) : (
+          /* Wallet Details view */
+          selectedWallet && (
+            <div style={{ paddingBottom: '20px' }}>
+              {/* Header */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setView('main')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: '6px',
+                      borderRadius: '50%',
+                      backgroundColor: 'var(--bg-grey)',
+                      width: '36px',
+                      height: '36px'
+                    }}
+                  >
+                    <ArrowLeft size={18} />
+                  </button>
+                  <h2 style={{ fontSize: '18px', fontWeight: 800 }}>{selectedWallet.name}</h2>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <button type="button" style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', padding: 0 }}><Search size={20} /></button>
+                  <button type="button" style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', padding: 0 }}><MoreVertical size={20} /></button>
+                </div>
+              </div>
+
+              {/* Time period filter selector */}
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
+                <select
+                  value={walletPeriod}
+                  onChange={(e) => setWalletPeriod(parseInt(e.target.value) as any)}
+                  style={{
+                    border: 'none',
+                    background: 'none',
+                    color: '#4EA8DE',
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    outline: 'none',
+                    padding: '4px 8px'
+                  }}
+                >
+                  <option value={30}>30 ngày gần nhất &gt;</option>
+                  <option value={90}>90 ngày gần nhất &gt;</option>
+                  <option value={365}>1 năm gần nhất &gt;</option>
+                </select>
+              </div>
+
+              {/* Summary Metrics Card */}
+              <div className="card" style={{ display: 'flex', padding: '16px 0', marginBottom: '16px' }}>
+                <div style={{ flex: 1, textAlign: 'center', borderRight: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Tổng thu</div>
+                  <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--secondary)' }}>
+                    {walletIncome.toLocaleString('vi-VN')} đ
+                  </div>
+                </div>
+                <div style={{ flex: 1, textAlign: 'center' }}>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Tổng chi</div>
+                  <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--danger)' }}>
+                    {walletExpense.toLocaleString('vi-VN')} đ
+                  </div>
+                </div>
+              </div>
+
+              {/* Current balance row */}
+              <div className="card" style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '14px 16px',
+                marginBottom: '20px'
+              }}>
+                <span style={{ fontSize: '14px', color: 'var(--text-secondary)', fontWeight: 600 }}>Số dư hiện tại</span>
+                <strong style={{
+                  fontSize: '17px',
+                  fontWeight: 800,
+                  color: 'var(--text-primary)',
+                  borderBottom: '3px double var(--text-primary)',
+                  paddingBottom: '2px'
+                }}>
+                  {selectedWallet.balance.toLocaleString('vi-VN')} đ
+                </strong>
+              </div>
+
+              {/* Transactions list grouped by date */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {Object.keys(groupedWalletTransactions).length === 0 ? (
+                  <p style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+                    Không có giao dịch nào trong khoảng thời gian này.
+                  </p>
+                ) : (
+                  Object.keys(groupedWalletTransactions).map(dateStr => {
+                    const dayTxs = groupedWalletTransactions[dateStr];
+                    const netChange = getDailyNetChange(dayTxs);
+
+                    return (
+                      <div key={dateStr} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {/* Group Header */}
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '4px 8px',
+                          borderBottom: '1px solid var(--border)',
+                          fontSize: '13px',
+                          color: 'var(--text-secondary)',
+                          fontWeight: 700
+                        }}>
+                          <span>{getFormattedDateHeader(dateStr)}</span>
+                          <span style={{
+                            color: netChange > 0 ? 'var(--secondary)' : netChange < 0 ? 'var(--danger)' : 'var(--text-secondary)',
+                            fontWeight: 700
+                          }}>
+                            {netChange > 0 ? '+' : ''}{netChange.toLocaleString('vi-VN')} đ
+                          </span>
+                        </div>
+
+                        {/* Group Items */}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {dayTxs.map(t => renderTransactionRow(t, true))}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )
+        )}
+      </PullToRefresh>
+
+      {/* Floating Plus action button specifically for wallet_detail */}
+      {view === 'wallet_detail' && (
+        <button
+          onClick={() => setModalOpen(true)}
+          className="btn btn-primary"
+          style={{
+            position: 'absolute',
+            bottom: '80px',
+            right: '20px',
+            width: '48px',
+            height: '48px',
+            borderRadius: '50%',
+            padding: 0,
+            boxShadow: 'var(--shadow-lg)',
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          <Plus size={24} />
+        </button>
+      )}
+
+      {/* Custom Transaction Modal Component */}
+      <TransactionModal 
+        isOpen={modalOpen} 
+        onClose={() => {
+          setModalOpen(false);
+          setSelectedTransaction(null);
+        }} 
+        transactionToEdit={selectedTransaction || undefined}
+        defaultWalletId={view === 'wallet_detail' && selectedWalletIdForDetail ? selectedWalletIdForDetail : undefined}
+      />
+    </>
+  );
+}
