@@ -468,10 +468,6 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
                 onChange={(e) => {
                   const newWalletId = e.target.value;
                   setSelectedWalletId(newWalletId);
-                  if (type === 'adjust') {
-                    const w = wallets.find(wl => wl.walletId === newWalletId);
-                    setAmountExpr(w ? w.balance.toString() : '');
-                  }
                 }}
               >
                 {wallets.map(w => (
