@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import CurrencyInput from '../../components/CurrencyInput';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { useToast } from '../../components/Toast';
 import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
 import type { FamilyMember, Wallet, Budget, CustomCategory, CustomIngredient } from '../../types';
-import { Users, PiggyBank, Settings, Coins, CreditCard, Plus, Trash2, Flame, Save, LogOut, Tag, Apple, HelpCircle, ChevronRight, ChevronDown, User, ArrowLeft, Calculator, Pencil, SlidersHorizontal, Star, UserCheck, Check } from 'lucide-react';
-import { signOut } from 'firebase/auth';
-import { auth } from '../../firebase';
+import { Users, PiggyBank, Settings, Coins, CreditCard, Plus, Trash2, Flame, Save, LogOut, Tag, Apple, HelpCircle, ChevronRight, ChevronDown, User, ArrowLeft, Calculator, Pencil, SlidersHorizontal, Star, UserCheck, Check, Copy, Shield, MessageSquare, Crown, Info, BarChart3, TrendingUp, Eye, EyeOff, Send, Lock, AlertCircle } from 'lucide-react';
+import { signOut, updateProfile, updatePassword, reauthenticateWithCredential, EmailAuthProvider, sendEmailVerification } from 'firebase/auth';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, db } from '../../firebase';
 import { getMergedCategories, ICON_MAP } from '../../core/constants';
 
 const ICON_OPTIONS: { name: string; label: string }[] = [
@@ -137,16 +139,18 @@ function IconPicker({ value, onChange, color }: { value: string; onChange: (v: s
 
 
 export default function SettingsPage() {
-  const { user } = useAuthStore();
+  const { user, setUser } = useAuthStore();
   const confirm = useConfirm();
-  const { 
-    family, 
-    wallets, 
-    budgets, 
-    saveFamily, 
-    createWallet, 
-    deleteWallet, 
-    saveBudget, 
+  const showToast = useToast();
+  const {
+    family,
+    wallets,
+    budgets,
+    transactions,
+    saveFamily,
+    createWallet,
+    deleteWallet,
+    saveBudget,
     deleteBudget,
     createTransaction,
     customCategories,
@@ -159,7 +163,29 @@ export default function SettingsPage() {
 
   const mergedCategories = getMergedCategories(customCategories);
 
-  const [view, setView] = useState<'menu' | 'family' | 'wallets' | 'budgets' | 'categories' | 'ingredients' | 'account'>('menu');
+  const [view, setView] = useState<'menu' | 'family' | 'wallets' | 'budgets' | 'categories' | 'ingredients' | 'account' | 'editProfile' | 'changePassword' | 'feedback' | 'help' | 'about'>('menu');
+  const [copiedFamilyId, setCopiedFamilyId] = useState(false);
+
+  // --- ACCOUNT SUB-SCREENS STATE ---
+  // Profile edit
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [displayNameOverride, setDisplayNameOverride] = useState<string | null>(null);
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
+
+  // Password change
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+
+  // Feedback
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackCategory, setFeedbackCategory] = useState<'bug' | 'feature' | 'other'>('other');
+  const [isSendingFeedback, setIsSendingFeedback] = useState(false);
 
   // --- CUSTOM CATEGORY EDIT STATE ---
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
@@ -266,7 +292,7 @@ export default function SettingsPage() {
   const handleSaveFamilyName = async () => {
     if (!editFamilyName.trim()) return;
     await recalculateAndSaveFamily(family.members, editFamilyName.trim());
-    alert("Đã cập nhật tên gia đình!");
+    showToast("Đã cập nhật tên gia đình!", "success");
   };
 
   const handleAddMember = async () => {
@@ -300,7 +326,7 @@ export default function SettingsPage() {
 
   const handleDeleteMember = async (id: string) => {
     if (family.members.length <= 1) {
-      alert("Đại gia đình cần có ít nhất một thành viên!");
+      showToast("Gia đình cần có ít nhất một thành viên!", "warning");
       return;
     }
     const yes = await confirm({
@@ -363,7 +389,7 @@ export default function SettingsPage() {
 
   const handleDeleteWallet = async (walletId: string) => {
     if (wallets.length <= 1) {
-      alert("Không thể xóa ví duy nhất còn lại!");
+      showToast("Không thể xóa ví duy nhất còn lại!", "warning");
       return;
     }
     const yes = await confirm({
@@ -388,7 +414,7 @@ export default function SettingsPage() {
   const handleCreateBudget = async () => {
     const cat = newBudgetCategory || mergedCategories.filter(c => c.type === 'expense').find(c => !budgets.some(b => b.category === c.name))?.name;
     if (!cat) {
-      alert("Không còn danh mục nào chưa thiết lập hạn mức!");
+      showToast("Không còn danh mục nào chưa thiết lập hạn mức!", "info");
       return;
     }
     const budgetId = 'budget_' + cat.replace(/\s+/g, '').replace(/\//g, '');
@@ -482,10 +508,10 @@ export default function SettingsPage() {
       await createTransaction(family.familyId, transactionData);
       setAdjustingWalletId(null);
       setShowAdjustKeypad(false);
-      alert("Đã điều chỉnh số dư ví và tự động tạo giao dịch bù trừ!");
+      showToast("Đã điều chỉnh số dư và tạo giao dịch bù trừ!", "success");
     } catch (err) {
       console.error(err);
-      alert("Lỗi khi điều chỉnh số dư");
+      showToast("Lỗi khi điều chỉnh số dư", "error");
     }
   };
 
@@ -511,10 +537,10 @@ export default function SettingsPage() {
     try {
       await addCustomCategory(family.familyId, newCat);
       setNewCatName('');
-      alert("Đã thêm danh mục tùy chỉnh!");
+      showToast("Đã thêm danh mục tùy chỉnh!", "success");
     } catch (err) {
       console.error(err);
-      alert("Lỗi khi thêm danh mục tùy chỉnh");
+      showToast("Lỗi khi thêm danh mục tùy chỉnh", "error");
     }
   };
 
@@ -530,7 +556,7 @@ export default function SettingsPage() {
         await deleteCustomCategory(family.familyId, catId);
       } catch (err) {
         console.error(err);
-        alert("Lỗi khi xóa danh mục");
+        showToast("Lỗi khi xóa danh mục", "error");
       }
     }
   };
@@ -546,10 +572,10 @@ export default function SettingsPage() {
     try {
       await addCustomIngredient(family.familyId, newIng);
       setNewIngName('');
-      alert("Đã thêm nguyên liệu tùy chỉnh!");
+      showToast("Đã thêm nguyên liệu tùy chỉnh!", "success");
     } catch (err) {
       console.error(err);
-      alert("Lỗi khi thêm nguyên liệu");
+      showToast("Lỗi khi thêm nguyên liệu", "error");
     }
   };
 
@@ -565,7 +591,7 @@ export default function SettingsPage() {
         await deleteCustomIngredient(family.familyId, ingId);
       } catch (err) {
         console.error(err);
-        alert("Lỗi khi xóa nguyên liệu");
+        showToast("Lỗi khi xóa nguyên liệu", "error");
       }
     }
   };
@@ -582,10 +608,10 @@ export default function SettingsPage() {
     try {
       await addCustomCategory(family.familyId, updatedCat);
       setEditingCategoryId(null);
-      alert("Đã cập nhật danh mục!");
+      showToast("Đã cập nhật danh mục!", "success");
     } catch (err) {
       console.error(err);
-      alert("Lỗi khi cập nhật danh mục");
+      showToast("Lỗi khi cập nhật danh mục", "error");
     }
   };
 
@@ -599,10 +625,98 @@ export default function SettingsPage() {
     try {
       await addCustomIngredient(family.familyId, updatedIng);
       setEditingIngredientId(null);
-      alert("Đã cập nhật nguyên liệu!");
+      showToast("Đã cập nhật nguyên liệu!", "success");
     } catch (err) {
       console.error(err);
-      alert("Lỗi khi cập nhật nguyên liệu");
+      showToast("Lỗi khi cập nhật nguyên liệu", "error");
+    }
+  };
+
+  // --- ACCOUNT HANDLERS ---
+  const handleUpdateProfile = async () => {
+    if (!editDisplayName.trim() || !user) return;
+    setIsUpdatingProfile(true);
+    try {
+      await updateProfile(user, { displayName: editDisplayName.trim() });
+      setDisplayNameOverride(editDisplayName.trim());
+      showToast('Đã cập nhật tên hiển thị!', 'success');
+      setView('account');
+    } catch {
+      showToast('Lỗi khi cập nhật thông tin', 'error');
+    } finally {
+      setIsUpdatingProfile(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!user || !user.email) return;
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordError('Vui lòng điền đầy đủ thông tin');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Mật khẩu mới không khớp');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordError('Mật khẩu phải có ít nhất 6 ký tự');
+      return;
+    }
+    setIsChangingPassword(true);
+    setPasswordError('');
+    try {
+      const credential = EmailAuthProvider.credential(user.email, currentPassword);
+      await reauthenticateWithCredential(user, credential);
+      await updatePassword(user, newPassword);
+      showToast('Đã đổi mật khẩu thành công!', 'success');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setView('account');
+    } catch (err: any) {
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setPasswordError('Mật khẩu hiện tại không đúng');
+      } else {
+        setPasswordError('Đã có lỗi xảy ra. Vui lòng thử lại.');
+      }
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  const handleSendVerification = async () => {
+    if (!user) return;
+    try {
+      await sendEmailVerification(user);
+      showToast('Email xác thực đã được gửi! Vui lòng kiểm tra hộp thư.', 'success');
+    } catch {
+      showToast('Lỗi khi gửi email xác thực', 'error');
+    }
+  };
+
+  const handleSendFeedback = async () => {
+    if (!feedbackMessage.trim() || !user) return;
+    setIsSendingFeedback(true);
+    try {
+      await addDoc(collection(db, 'feedbacks'), {
+        userId: user.uid,
+        userEmail: user.email,
+        familyId: family?.familyId || '',
+        familyName: family?.familyName || '',
+        category: feedbackCategory,
+        message: feedbackMessage.trim(),
+        appVersion: '1.0.0',
+        status: 'new',
+        createdAt: serverTimestamp(),
+      });
+      showToast('Đã gửi phản hồi! Cảm ơn bạn.', 'success');
+      setFeedbackMessage('');
+      setFeedbackCategory('other');
+      setView('account');
+    } catch {
+      showToast('Lỗi khi gửi phản hồi. Vui lòng thử lại.', 'error');
+    } finally {
+      setIsSendingFeedback(false);
     }
   };
 
@@ -626,38 +740,40 @@ export default function SettingsPage() {
   return (
     <div className="scrollable" style={{ paddingBottom: '90px' }}>
       {/* Sub-page Navigation Header */}
-      {view !== 'menu' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
-          <button
-            type="button"
-            onClick={() => setView('menu')}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-primary)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '6px',
-              borderRadius: '50%',
-              backgroundColor: 'var(--bg-grey)',
-              width: '36px',
-              height: '36px'
-            }}
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <h2 style={{ fontSize: '18px', fontWeight: 800 }}>
-            {view === 'family' ? 'Gia đình & Thành viên' :
-             view === 'wallets' ? 'Quản lý Ví tiền' :
-             view === 'budgets' ? 'Quản lý Hạn mức' :
-             view === 'categories' ? 'Danh mục Chi tiêu' :
-             view === 'ingredients' ? 'Danh mục Nguyên liệu' :
-             'Thông tin Tài khoản'}
-          </h2>
-        </div>
-      )}
+      {view !== 'menu' && (() => {
+        const accountSubViews = new Set(['editProfile', 'changePassword', 'feedback', 'help', 'about']);
+        const backTarget: any = accountSubViews.has(view) ? 'account' : 'menu';
+        const titles: Record<string, string> = {
+          family: 'Gia đình & Thành viên',
+          wallets: 'Quản lý Ví tiền',
+          budgets: 'Quản lý Hạn mức',
+          categories: 'Danh mục Chi tiêu',
+          ingredients: 'Danh mục Nguyên liệu',
+          account: 'Thông tin Tài khoản',
+          editProfile: 'Sửa thông tin cá nhân',
+          changePassword: 'Đổi mật khẩu',
+          feedback: 'Gửi phản hồi',
+          help: 'Hướng dẫn sử dụng',
+          about: 'Về ứng dụng',
+        };
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px', borderBottom: '1px solid var(--border)', paddingBottom: '12px' }}>
+            <button
+              type="button"
+              onClick={() => setView(backTarget)}
+              style={{
+                background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '6px', borderRadius: '50%', backgroundColor: 'var(--bg-grey)',
+                width: '36px', height: '36px'
+              }}
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <h2 style={{ fontSize: '18px', fontWeight: 800 }}>{titles[view] || 'Cài đặt'}</h2>
+          </div>
+        );
+      })()}
 
       {/* 0. MAIN SETTINGS MENU */}
       {view === 'menu' && (
@@ -2023,37 +2139,627 @@ export default function SettingsPage() {
       {/* 6. ACCOUNT SUB-PAGE */}
       {view === 'account' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 700, borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>Thông tin tài khoản</h3>
-            <div style={{ fontSize: '14px' }}>
-              <div style={{ color: 'var(--text-secondary)', marginBottom: '4px' }}>Email đăng nhập</div>
-              <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{user.email}</div>
+
+          {/* Profile Hero */}
+          <div style={{
+            background: 'linear-gradient(135deg, var(--primary) 0%, #F15BB5 100%)',
+            borderRadius: 'var(--border-radius-md)',
+            padding: '24px 20px',
+            boxShadow: '0 4px 20px rgba(255, 140, 105, 0.35)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <div style={{
+                width: '64px', height: '64px', borderRadius: '20px', flexShrink: 0,
+                backgroundColor: 'rgba(255,255,255,0.25)',
+                border: '2px solid rgba(255,255,255,0.4)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '26px', fontWeight: 800, color: 'white'
+              }}>
+                {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
+                  <div style={{ fontSize: '18px', fontWeight: 800, color: 'white', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+                    {displayNameOverride ?? (user.displayName || user.email?.split('@')[0] || 'Người dùng')}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setEditDisplayName(displayNameOverride ?? user.displayName ?? ''); setView('editProfile'); }}
+                    style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.3)', borderRadius: '8px', color: 'white', cursor: 'pointer', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}
+                  >
+                    <Pencil size={12} />
+                    <span style={{ fontSize: '11px', fontWeight: 700 }}>Sửa</span>
+                  </button>
+                </div>
+                <div style={{ fontSize: '13px', color: 'rgba(255,255,255,0.85)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {user.email}
+                </div>
+                {(() => {
+                  const linkedId = family.linkedMemberIds?.[user.uid];
+                  const linked = family.members.find(m => m.id === linkedId);
+                  if (!linked) return null;
+                  const roleLabel = linked.role === 'father' ? 'Bố' : linked.role === 'mother' ? 'Mẹ' : linked.role === 'grandparent' ? 'Ông/Bà' : 'Con';
+                  return (
+                    <div style={{
+                      marginTop: '8px', display: 'inline-flex', alignItems: 'center', gap: '5px',
+                      backgroundColor: 'rgba(255,255,255,0.2)', padding: '4px 10px', borderRadius: '20px',
+                      border: '1px solid rgba(255,255,255,0.3)'
+                    }}>
+                      <User size={11} style={{ color: 'white' }} />
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: 'white' }}>{linked.name} · {roleLabel}</span>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
-            <div style={{ fontSize: '14px' }}>
-              <div style={{ color: 'var(--text-secondary)', marginBottom: '4px' }}>Mã nhóm Gia đình</div>
-              <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>{family.familyId}</div>
+          </div>
+
+          {/* Gói dịch vụ */}
+          <div className="card">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Crown size={18} style={{ color: '#F77F00' }} />
+                <span style={{ fontWeight: 700, fontSize: '15px' }}>Gói dịch vụ</span>
+              </div>
+              <span style={{
+                fontSize: '11px', fontWeight: 700, padding: '4px 10px', borderRadius: '20px',
+                backgroundColor: '#FFF3E0', color: '#F77F00', border: '1px solid #FFE0B2'
+              }}>
+                Cơ bản · Miễn phí
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '12px' }}>
+              {[
+                { label: 'Giao dịch', value: transactions.length, color: '#FF8C69', icon: BarChart3 },
+                { label: 'Ví tiền', value: wallets.length, color: '#4EA8DE', icon: PiggyBank },
+                { label: 'Hạn mức', value: budgets.length, color: '#8338EC', icon: TrendingUp },
+              ].map(stat => {
+                const StatIcon = stat.icon;
+                return (
+                  <div key={stat.label} style={{
+                    textAlign: 'center', padding: '12px 8px', borderRadius: '12px',
+                    backgroundColor: `${stat.color}10`, border: `1px solid ${stat.color}25`
+                  }}>
+                    <StatIcon size={16} style={{ color: stat.color, marginBottom: '4px' }} />
+                    <div style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1 }}>{stat.value}</div>
+                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)', fontWeight: 600, marginTop: '3px' }}>{stat.label}</div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{
+              padding: '10px 12px', borderRadius: '10px',
+              backgroundColor: 'var(--bg-grey)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+            }}>
+              <div>
+                <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>Tính năng nâng cao</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>Báo cáo AI · Đa gia đình · Xuất Excel</div>
+              </div>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)' }}>Sắp có</span>
+            </div>
+          </div>
+
+          {/* Nhóm gia đình */}
+          <div className="card">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+              <Users size={18} style={{ color: 'var(--primary)' }} />
+              <span style={{ fontWeight: 700, fontSize: '15px' }}>Nhóm gia đình</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+              {[
+                { label: 'Tên nhóm', value: family.familyName },
+                { label: 'Thành viên', value: `${family.members.length} người` },
+              ].map((row, idx) => (
+                <div key={row.label} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '10px 0',
+                  borderBottom: '1px solid var(--border)'
+                }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{row.label}</span>
+                  <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)' }}>{row.value}</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
+                <div>
+                  <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '3px' }}>Mã nhóm</div>
+                  <div style={{ fontSize: '11px', fontFamily: 'monospace', color: 'var(--text-primary)', fontWeight: 700, letterSpacing: '0.5px' }}>
+                    {family.familyId}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(family.familyId);
+                    setCopiedFamilyId(true);
+                    setTimeout(() => setCopiedFamilyId(false), 2000);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '5px',
+                    padding: '7px 12px', borderRadius: '8px',
+                    border: '1px solid var(--border)',
+                    backgroundColor: copiedFamilyId ? '#E8F5E9' : 'var(--bg-grey)',
+                    color: copiedFamilyId ? '#2E7D32' : 'var(--text-secondary)',
+                    cursor: 'pointer', fontSize: '12px', fontWeight: 700,
+                    transition: 'all 0.2s', flexShrink: 0
+                  }}
+                >
+                  {copiedFamilyId ? (<><Check size={13} /> Đã sao chép</>) : (<><Copy size={13} /> Sao chép</>)}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Hỗ trợ */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            {[
+              { IconComp: MessageSquare, label: 'Gửi phản hồi / Góp ý', color: '#8338EC', desc: 'Báo lỗi hoặc đề xuất tính năng mới', target: 'feedback' },
+              { IconComp: HelpCircle, label: 'Hướng dẫn sử dụng', color: '#4EA8DE', desc: 'Xem cách dùng các tính năng', target: 'help' },
+              { IconComp: Info, label: 'Về ứng dụng · v1.0.0', color: 'var(--text-secondary)', desc: 'SmartHomeMom · Quản lý tài chính gia đình', target: 'about' },
+            ].map((item, idx, arr) => {
+              const { IconComp } = item;
+              return (
+                <div
+                  key={item.label}
+                  onClick={() => setView(item.target as any)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '14px 16px',
+                    borderBottom: idx < arr.length - 1 ? '1px solid var(--border)' : 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                      width: '34px', height: '34px', borderRadius: '8px', flexShrink: 0,
+                      backgroundColor: `${item.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}>
+                      <IconComp size={17} style={{ color: item.color }} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{item.label}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>{item.desc}</div>
+                    </div>
+                  </div>
+                  <ChevronRight size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Đăng xuất */}
+          <button
+            type="button"
+            onClick={handleSignOut}
+            style={{
+              width: '100%', height: '50px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+              borderRadius: 'var(--border-radius-md)',
+              border: '1px solid #FFCDD2',
+              backgroundColor: '#FFEBEE',
+              color: 'var(--danger)',
+              fontWeight: 700, fontSize: '15px',
+              cursor: 'pointer'
+            }}
+          >
+            <LogOut size={17} /> Đăng xuất tài khoản
+          </button>
+
+          <div style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-secondary)', paddingBottom: '4px' }}>
+            SmartHomeMom · Quản lý chi tiêu gia đình thông minh
+          </div>
+        </div>
+      )}
+
+      {/* 7. EDIT PROFILE */}
+      {view === 'editProfile' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Avatar preview */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '24px 0 8px' }}>
+            <div style={{
+              width: '80px', height: '80px', borderRadius: '24px',
+              background: 'linear-gradient(135deg, var(--primary) 0%, #F15BB5 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '32px', fontWeight: 800, color: 'white',
+              boxShadow: '0 4px 16px rgba(255,140,105,0.4)', marginBottom: '12px'
+            }}>
+              {(editDisplayName || displayNameOverride || user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Ảnh đại diện tự động từ ký tự đầu tên</div>
+          </div>
+
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', display: 'block' }}>Tên hiển thị</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Nhập tên hiển thị của bạn"
+                value={editDisplayName}
+                onChange={e => setEditDisplayName(e.target.value)}
+                autoFocus
+              />
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '5px' }}>
+                Tên này sẽ hiển thị trong ứng dụng thay cho địa chỉ email
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', display: 'block' }}>Email đăng nhập</label>
+              <div style={{
+                padding: '12px 14px', borderRadius: 'var(--border-radius-sm)',
+                backgroundColor: 'var(--bg-grey)', border: '1px solid var(--border)',
+                fontSize: '14px', color: 'var(--text-secondary)', fontWeight: 600,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+              }}>
+                <span>{user.email}</span>
+                <span style={{
+                  fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '6px',
+                  backgroundColor: 'var(--bg-card)', color: 'var(--text-secondary)'
+                }}>Không thể thay đổi</span>
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', display: 'block' }}>ID tài khoản</label>
+              <div style={{
+                padding: '10px 14px', borderRadius: 'var(--border-radius-sm)',
+                backgroundColor: 'var(--bg-grey)', border: '1px solid var(--border)',
+                fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace'
+              }}>
+                {user.uid}
+              </div>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={handleSignOut}
-            className="btn btn-secondary"
-            style={{
-              width: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              color: 'var(--danger)',
-              backgroundColor: '#FFEBEE',
-              borderColor: '#FFCDD2',
-              fontWeight: 700,
-              height: '48px'
-            }}
+            onClick={handleUpdateProfile}
+            disabled={isUpdatingProfile || !editDisplayName.trim()}
+            className="btn btn-primary"
+            style={{ width: '100%', height: '50px', fontSize: '15px', fontWeight: 700, opacity: (!editDisplayName.trim() || isUpdatingProfile) ? 0.6 : 1 }}
           >
-            <LogOut size={16} /> Đăng xuất tài khoản
+            {isUpdatingProfile ? 'Đang lưu...' : 'Lưu thay đổi'}
           </button>
+        </div>
+      )}
+
+      {/* 8. CHANGE PASSWORD */}
+      {view === 'changePassword' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="card" style={{ backgroundColor: '#F3E5FF', borderColor: '#CE93D8', borderWidth: '1.5px' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+              <Lock size={16} style={{ color: '#8338EC', flexShrink: 0, marginTop: '2px' }} />
+              <div style={{ fontSize: '13px', color: '#4A148C', lineHeight: 1.5 }}>
+                Để bảo vệ tài khoản, vui lòng nhập mật khẩu hiện tại trước khi đặt mật khẩu mới.
+              </div>
+            </div>
+          </div>
+
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {/* Mật khẩu hiện tại */}
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', display: 'block' }}>Mật khẩu hiện tại</label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showCurrentPw ? 'text' : 'password'}
+                  className="form-control"
+                  placeholder="Nhập mật khẩu hiện tại"
+                  value={currentPassword}
+                  onChange={e => { setCurrentPassword(e.target.value); setPasswordError(''); }}
+                  style={{ paddingRight: '44px' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPw(v => !v)}
+                  style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '4px' }}
+                >
+                  {showCurrentPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            <div style={{ height: '1px', backgroundColor: 'var(--border)' }} />
+
+            {/* Mật khẩu mới */}
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', display: 'block' }}>Mật khẩu mới</label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showNewPw ? 'text' : 'password'}
+                  className="form-control"
+                  placeholder="Tối thiểu 6 ký tự"
+                  value={newPassword}
+                  onChange={e => { setNewPassword(e.target.value); setPasswordError(''); }}
+                  style={{ paddingRight: '44px' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPw(v => !v)}
+                  style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '4px' }}
+                >
+                  {showNewPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              {/* Thanh độ mạnh mật khẩu */}
+              {newPassword.length > 0 && (
+                <div style={{ marginTop: '8px' }}>
+                  <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
+                    {[1,2,3,4].map(i => {
+                      const strength = newPassword.length < 6 ? 1 : newPassword.length < 8 ? 2 : /[A-Z]/.test(newPassword) && /[0-9]/.test(newPassword) ? 4 : 3;
+                      return (
+                        <div key={i} style={{ flex: 1, height: '3px', borderRadius: '2px', backgroundColor: i <= strength ? (strength <= 1 ? 'var(--danger)' : strength === 2 ? '#F77F00' : strength === 3 ? '#FFD166' : '#06D6A0') : 'var(--border)' }} />
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                    {newPassword.length < 6 ? 'Yếu — cần ít nhất 6 ký tự' : newPassword.length < 8 ? 'Trung bình' : /[A-Z]/.test(newPassword) && /[0-9]/.test(newPassword) ? 'Rất mạnh' : 'Mạnh'}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Xác nhận mật khẩu */}
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', display: 'block' }}>Xác nhận mật khẩu mới</label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showConfirmPw ? 'text' : 'password'}
+                  className="form-control"
+                  placeholder="Nhập lại mật khẩu mới"
+                  value={confirmPassword}
+                  onChange={e => { setConfirmPassword(e.target.value); setPasswordError(''); }}
+                  style={{
+                    paddingRight: '44px',
+                    borderColor: confirmPassword && newPassword && confirmPassword !== newPassword ? 'var(--danger)' : confirmPassword && newPassword && confirmPassword === newPassword ? '#06D6A0' : 'var(--border)'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPw(v => !v)}
+                  style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '4px' }}
+                >
+                  {showConfirmPw ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              {confirmPassword && newPassword && confirmPassword === newPassword && (
+                <div style={{ fontSize: '11px', color: '#06D6A0', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Check size={12} /> Mật khẩu khớp
+                </div>
+              )}
+            </div>
+
+            {/* Lỗi */}
+            {passwordError && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 12px', borderRadius: '10px', backgroundColor: '#FFEBEE', border: '1px solid #FFCDD2' }}>
+                <AlertCircle size={15} style={{ color: 'var(--danger)', flexShrink: 0 }} />
+                <span style={{ fontSize: '13px', color: 'var(--danger)', fontWeight: 600 }}>{passwordError}</span>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleChangePassword}
+            disabled={isChangingPassword}
+            className="btn btn-primary"
+            style={{ width: '100%', height: '50px', fontSize: '15px', fontWeight: 700, backgroundColor: '#8338EC', borderColor: '#8338EC', opacity: isChangingPassword ? 0.6 : 1 }}
+          >
+            {isChangingPassword ? 'Đang xử lý...' : 'Đổi mật khẩu'}
+          </button>
+        </div>
+      )}
+
+      {/* 9. FEEDBACK */}
+      {view === 'feedback' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="card" style={{ backgroundColor: '#F3E5FF', borderColor: '#CE93D8' }}>
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+              <MessageSquare size={16} style={{ color: '#8338EC', flexShrink: 0, marginTop: '2px' }} />
+              <div style={{ fontSize: '13px', color: '#4A148C', lineHeight: 1.5 }}>
+                Phản hồi của bạn giúp chúng tôi cải thiện ứng dụng mỗi ngày. Mọi góp ý đều được đọc kỹ!
+              </div>
+            </div>
+          </div>
+
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', display: 'block' }}>Loại phản hồi</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
+                {([
+                  { value: 'bug', label: '🐛 Báo lỗi', color: 'var(--danger)' },
+                  { value: 'feature', label: '✨ Đề xuất', color: '#8338EC' },
+                  { value: 'other', label: '💬 Góp ý', color: '#4EA8DE' },
+                ] as const).map(cat => (
+                  <button
+                    key={cat.value}
+                    type="button"
+                    onClick={() => setFeedbackCategory(cat.value)}
+                    style={{
+                      padding: '10px 6px', borderRadius: '10px', border: `2px solid ${feedbackCategory === cat.value ? cat.color : 'var(--border)'}`,
+                      backgroundColor: feedbackCategory === cat.value ? `${cat.color}12` : 'var(--bg-grey)',
+                      color: feedbackCategory === cat.value ? cat.color : 'var(--text-secondary)',
+                      cursor: 'pointer', fontSize: '12px', fontWeight: 700, textAlign: 'center', transition: 'all 0.15s'
+                    }}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, marginBottom: '6px', display: 'block' }}>Nội dung phản hồi</label>
+              <textarea
+                className="form-control"
+                placeholder={feedbackCategory === 'bug' ? 'Mô tả lỗi bạn gặp phải, khi nào xảy ra, thao tác nào dẫn đến lỗi...' : feedbackCategory === 'feature' ? 'Tính năng bạn mong muốn, lý do hữu ích với gia đình bạn...' : 'Nhận xét, góp ý, cảm nhận của bạn về ứng dụng...'}
+                value={feedbackMessage}
+                onChange={e => setFeedbackMessage(e.target.value)}
+                style={{ minHeight: '120px', resize: 'none', lineHeight: 1.6 }}
+              />
+              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '5px', textAlign: 'right' }}>
+                {feedbackMessage.length} ký tự
+              </div>
+            </div>
+
+            <div style={{ padding: '10px 12px', borderRadius: '10px', backgroundColor: 'var(--bg-grey)', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Phản hồi sẽ được gửi qua email tới nhóm phát triển kèm thông tin tài khoản của bạn để hỗ trợ tốt hơn.
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSendFeedback}
+            disabled={!feedbackMessage.trim() || isSendingFeedback}
+            className="btn btn-primary"
+            style={{ width: '100%', height: '50px', fontSize: '15px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', backgroundColor: '#8338EC', borderColor: '#8338EC', opacity: (!feedbackMessage.trim() || isSendingFeedback) ? 0.6 : 1 }}
+          >
+            <Send size={17} /> {isSendingFeedback ? 'Đang gửi...' : 'Gửi phản hồi'}
+          </button>
+        </div>
+      )}
+
+      {/* 10. HELP — Hướng dẫn sử dụng */}
+      {view === 'help' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {([
+            {
+              emoji: '💰', title: 'Ghi Thu Chi', color: '#FF8C69',
+              items: [
+                'Nhấn nút + ở giữa thanh điều hướng để thêm giao dịch mới',
+                'Chọn loại: Chi tiêu, Thu nhập hoặc Chuyển khoản giữa ví',
+                'Tab "Thu Chi" hiển thị lịch sử, số dư từng ví và tình trạng hạn mức',
+              ]
+            },
+            {
+              emoji: '🍽️', title: 'Lên Thực Đơn', color: '#06D6A0',
+              items: [
+                'Tab "Thực Đơn" → nhấn "Tạo thực đơn tuần" để AI gợi ý bữa ăn phù hợp',
+                'Giao diện hiển thị thực đơn theo ngày: Sáng, Trưa, Tối',
+                'Nhấn vào bữa để xem nguyên liệu chi tiết và calo',
+              ]
+            },
+            {
+              emoji: '🛒', title: 'Lịch Đi Chợ', color: '#4EA8DE',
+              items: [
+                'Trong tab Thực Đơn, chuyển sang tab "Lịch đi chợ"',
+                'Hệ thống tổng hợp nguyên liệu theo tuần và nhóm theo khu vực chợ',
+                'Nhấn tick vào từng mục đã mua, nhấn "Xóa đã mua" để dọn danh sách',
+              ]
+            },
+            {
+              emoji: '💳', title: 'Quản lý Ví Tiền', color: '#8338EC',
+              items: [
+                'Vào Cài đặt → Quản lý Ví để thêm ví tiền mặt, tài khoản ngân hàng, ví MoMo...',
+                'Nhấn "Cân đối" để điều chỉnh số dư thực tế của ví khi có sai lệch',
+                'Ví lưu trữ không tính vào tổng số dư — dùng để theo dõi tiền tiết kiệm',
+              ]
+            },
+            {
+              emoji: '🎯', title: 'Hạn Mức Chi Tiêu', color: '#F15BB5',
+              items: [
+                'Vào Cài đặt → Quản lý Hạn mức để thiết lập ngân sách theo danh mục',
+                'Dashboard hiển thị % đã chi so với hạn mức theo từng danh mục',
+                'Hệ thống sẽ cảnh báo khi chi tiêu vượt 80% ngưỡng đặt ra',
+              ]
+            },
+            {
+              emoji: '👨‍👩‍👧', title: 'Gia Đình & Thành Viên', color: '#F77F00',
+              items: [
+                'Thêm các thành viên trong gia đình để tính toán calo và dinh dưỡng chính xác hơn',
+                'Mỗi thành viên có thể liên kết với tài khoản riêng qua tính năng chia sẻ nhóm',
+                'Nhập mã nhóm gia đình để nhiều điện thoại cùng quản lý chung một ngân sách',
+              ]
+            },
+          ] as const).map((section) => (
+            <div key={section.title} className="card" style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                <div style={{
+                  width: '36px', height: '36px', borderRadius: '10px', flexShrink: 0,
+                  backgroundColor: `${section.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '18px'
+                }}>
+                  {section.emoji}
+                </div>
+                <span style={{ fontWeight: 700, fontSize: '15px', color: section.color }}>{section.title}</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {section.items.map((tip, i) => (
+                  <div key={i} style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                    <div style={{
+                      width: '18px', height: '18px', borderRadius: '50%', flexShrink: 0, marginTop: '1px',
+                      backgroundColor: `${section.color}20`, color: section.color,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: '10px', fontWeight: 800
+                    }}>
+                      {i + 1}
+                    </div>
+                    <span style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.5 }}>{tip}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 11. ABOUT */}
+      {view === 'about' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* App identity */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '28px 20px 20px', textAlign: 'center' }}>
+            <div style={{
+              width: '80px', height: '80px', borderRadius: '24px',
+              background: 'linear-gradient(135deg, var(--primary) 0%, #F15BB5 100%)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '36px', marginBottom: '14px',
+              boxShadow: '0 8px 24px rgba(255,140,105,0.4)'
+            }}>
+              🏠
+            </div>
+            <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '4px' }}>SmartHomeMom</div>
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '10px' }}>Quản lý chi tiêu gia đình thông minh</div>
+            <span style={{ fontSize: '12px', fontWeight: 700, padding: '4px 14px', borderRadius: '20px', backgroundColor: 'var(--bg-grey)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+              Phiên bản 1.0.0
+            </span>
+          </div>
+
+          {/* App info */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            {[
+              { label: 'Phiên bản', value: '1.0.0' },
+              { label: 'Nhà phát triển', value: 'https://github.com/tuanano' },
+              { label: 'Liên hệ hỗ trợ', value: 'https://github.com/tuanano' }
+            ].map((row, idx, arr) => (
+              <div key={row.label} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '13px 16px',
+                borderBottom: idx < arr.length - 1 ? '1px solid var(--border)' : 'none'
+              }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{row.label}</span>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)', maxWidth: '200px', textAlign: 'right' }}>{row.value}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Legal */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            {['Chính sách quyền riêng tư', 'Điều khoản dịch vụ', 'Chính sách cookie'].map((item, idx, arr) => (
+              <div key={item} style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                padding: '13px 16px', cursor: 'default',
+                borderBottom: idx < arr.length - 1 ? '1px solid var(--border)' : 'none'
+              }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-primary)', fontWeight: 600 }}>{item}</span>
+                <ChevronRight size={14} style={{ color: 'var(--text-secondary)' }} />
+              </div>
+            ))}
+          </div>
+
+          <div style={{ textAlign: 'center', padding: '8px 0 4px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            © 2026 TuanLe<br />
+            Được làm với ❤️ cho các gia đình Việt Nam
+          </div>
         </div>
       )}
 

@@ -150,12 +150,18 @@ p {
   text-decoration: none;
   font-size: 11px;
   font-weight: 500;
-  width: var(--touch-target);
+  min-width: 0;
+  flex: 1;
   height: var(--touch-target);
   border: none;
   background: none;
   cursor: pointer;
   transition: color 0.2s ease;
+  gap: 2px;
+}
+
+.bottom-nav-item span {
+  white-space: nowrap;
 }
 
 .bottom-nav-item.active {

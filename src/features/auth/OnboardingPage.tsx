@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import CurrencyInput from '../../components/CurrencyInput';
+import { useToast } from '../../components/Toast';
 import { useAuthStore } from '../../stores/authStore';
 import { useFamilyStore } from '../../stores/familyStore';
 import type { Family, FamilyMember } from '../../types';
@@ -9,6 +10,7 @@ import { DEFAULT_CATEGORIES, DEFAULT_INGREDIENTS } from '../../core/constants';
 export default function OnboardingPage() {
   const { user } = useAuthStore();
   const { saveFamily, createWallet, saveBudget } = useFamilyStore();
+  const showToast = useToast();
 
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -143,7 +145,7 @@ export default function OnboardingPage() {
   // Actions for Step 2
   const addCustomWallet = () => {
     if (!customWalletName.trim()) {
-      alert("Vui lòng nhập tên ví!");
+      showToast("Vui lòng nhập tên ví!", "warning");
       return;
     }
     const newW = {
@@ -163,7 +165,7 @@ export default function OnboardingPage() {
 
   const removeWallet = (id: string) => {
     if (walletsSetup.length <= 1) {
-      alert("Cần có tối thiểu 1 ví để hoạt động!");
+      showToast("Cần có tối thiểu 1 ví để hoạt động!", "warning");
       return;
     }
     setWalletsSetup(walletsSetup.filter(w => w.walletId !== id));
@@ -206,13 +208,13 @@ export default function OnboardingPage() {
   const handleNextStep = () => {
     if (step === 1) {
       if (members.length === 0) {
-        alert("Vui lòng khai báo ít nhất một thành viên gia đình!");
+        showToast("Vui lòng khai báo ít nhất một thành viên gia đình!", "warning");
         return;
       }
       setStep(2);
     } else if (step === 2) {
       if (walletsSetup.length === 0) {
-        alert("Vui lòng thiết lập ít nhất một ví thanh toán!");
+        showToast("Vui lòng thiết lập ít nhất một ví thanh toán!", "warning");
         return;
       }
       setStep(3);
@@ -282,7 +284,7 @@ export default function OnboardingPage() {
       }
     } catch (err) {
       console.error("Error saving onboarding details: ", err);
-      alert("Đã xảy ra lỗi khi lưu cấu hình gia đình. Vui lòng thử lại!");
+      showToast("Đã xảy ra lỗi khi lưu, vui lòng thử lại!", "error");
     } finally {
       setLoading(false);
     }

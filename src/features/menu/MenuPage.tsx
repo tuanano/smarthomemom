@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { useToast } from '../../components/Toast';
 import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
 import { generateDailyMenu } from '../../core/gemini';
@@ -9,7 +10,7 @@ import RecipeGuideModal from './RecipeGuideModal';
 import { getMergedIngredients } from '../../core/constants';
 import { db } from '../../firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { Flame, ShoppingCart, Sparkles, CheckSquare, Square, ChefHat, Heart, Trash2, Plus, X, BookOpen } from 'lucide-react';
+import { Flame, ShoppingCart, Sparkles, CheckSquare, Square, ChefHat, Heart, Trash2, Plus, X, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import PullToRefresh from '../../components/PullToRefresh';
 import type { FavoriteMenu } from '../../types';
 
@@ -42,6 +43,7 @@ export default function MenuPage() {
   const { user } = useAuthStore();
   const { family, availableIngredients, favoriteMenus, saveFavoriteMenu, deleteFavoriteMenu, customIngredients } = useFamilyStore();
   const confirm = useConfirm();
+  const showToast = useToast();
   
   const [selectedDay, setSelectedDay] = useState('monday');
   const [weeklyMenu, setWeeklyMenu] = useState<{ [day: string]: DailyMenuResponse }>({});
@@ -58,6 +60,15 @@ export default function MenuPage() {
   // Favorite Menu save state
   const [showSaveFav, setShowSaveFav] = useState(false);
   const [favName, setFavName] = useState('');
+
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  const toggleCategory = (catKey: string) => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev);
+      next.has(catKey) ? next.delete(catKey) : next.add(catKey);
+      return next;
+    });
+  };
 
   // Load menu from Firestore doc `/families/{familyId}/menus/weekly_plan`
   useEffect(() => {
@@ -86,7 +97,7 @@ export default function MenuPage() {
   const handleGenerateDay = async () => {
     if (!user || !family) return;
     if (availableIngredients.length === 0) {
-      alert("Vui lòng kích hoạt nguyên liệu khả dụng trong Tủ nguyên liệu trước!");
+      showToast("Vui lòng kích hoạt nguyên liệu trong Tủ nguyên liệu trước!", "warning");
       return;
     }
 
@@ -105,7 +116,7 @@ export default function MenuPage() {
       await saveMenuToFirestore(updatedMenu);
     } catch (err) {
       console.error(err);
-      alert("Không thể kết nối dịch vụ AI. Đang chạy chế độ offline.");
+      showToast("Không thể kết nối dịch vụ AI. Đang chạy chế độ offline.", "error");
     } finally {
       setLoading(false);
     }
@@ -115,7 +126,7 @@ export default function MenuPage() {
   const handleGenerateWholeWeek = async () => {
     if (!user || !family) return;
     if (availableIngredients.length === 0) {
-      alert("Vui lòng kích hoạt nguyên liệu khả dụng trong Tủ nguyên liệu trước!");
+      showToast("Vui lòng kích hoạt nguyên liệu trong Tủ nguyên liệu trước!", "warning");
       return;
     }
     setLoading(true);
@@ -135,7 +146,7 @@ export default function MenuPage() {
       await saveMenuToFirestore(tempMenu);
     } catch (err) {
       console.error(err);
-      alert("Lỗi khi tạo thực đơn cả tuần.");
+      showToast("Lỗi khi tạo thực đơn cả tuần.", "error");
     } finally {
       setLoading(false);
     }
@@ -144,7 +155,7 @@ export default function MenuPage() {
   // Compile Shopping List based on current Weekly Menu
   const getAggregatedShoppingList = () => {
     const ingredientCounts: { [id: string]: number } = {};
-    
+
     Object.values(weeklyMenu).forEach(dayMenu => {
       Object.values(dayMenu.meals).forEach(mealList => {
         mealList.forEach(dish => {
@@ -159,15 +170,21 @@ export default function MenuPage() {
 
     const mergedIngredients = getMergedIngredients(customIngredients);
 
-    return Object.keys(ingredientCounts).map(ingId => {
+    // Deduplicate by canonical name (case-insensitive) — merge AI-invented IDs that map to same ingredient
+    const seen = new Map<string, { id: string; name: string; category: string; frequency: number }>();
+    Object.keys(ingredientCounts).forEach(ingId => {
       const meta = mergedIngredients.find(i => i.id === ingId);
-      return {
-        id: ingId,
-        name: meta?.name || ingId,
-        category: meta?.category || 'dry_spice',
-        frequency: ingredientCounts[ingId]
-      };
+      const name = meta?.name || ingId.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const category = meta?.category || 'dry_spice';
+      const key = name.toLowerCase();
+      if (seen.has(key)) {
+        seen.get(key)!.frequency += ingredientCounts[ingId];
+      } else {
+        seen.set(key, { id: ingId, name, category, frequency: ingredientCounts[ingId] });
+      }
     });
+
+    return Array.from(seen.values());
   };
 
   const handleSaveMealFromModal = async (meal: Meal) => {
@@ -274,10 +291,10 @@ export default function MenuPage() {
       await saveFavoriteMenu(family!.familyId, favMenu);
       setShowSaveFav(false);
       setFavName('');
-      alert("Đã lưu thực đơn vào danh mục yêu thích!");
+      showToast("Đã lưu thực đơn vào danh mục yêu thích!", "success");
     } catch (err) {
       console.error(err);
-      alert("Lỗi khi lưu thực đơn");
+      showToast("Lỗi khi lưu thực đơn", "error");
     }
   };
 
@@ -302,7 +319,7 @@ export default function MenuPage() {
     setWeeklyMenu(updatedMenu);
     await saveMenuToFirestore(updatedMenu);
     setActiveSubTab('menu');
-    alert(`Đã áp dụng thực đơn yêu thích "${fav.name}" vào ngày ${DAYS_OF_WEEK.find(d => d.id === selectedDay)?.name}`);
+    showToast(`Đã áp dụng "${fav.name}" vào ngày ${DAYS_OF_WEEK.find(d => d.id === selectedDay)?.name}`, 'success');
   };
 
   const handleDeleteFavorite = async (favMenuId: string) => {
@@ -318,7 +335,7 @@ export default function MenuPage() {
         await deleteFavoriteMenu(family.familyId, favMenuId);
       } catch (err) {
         console.error(err);
-        alert("Lỗi khi xóa thực đơn yêu thích");
+        showToast("Lỗi khi xóa thực đơn yêu thích", "error");
       }
     }
   };
@@ -347,12 +364,12 @@ export default function MenuPage() {
     return acc;
   }, {} as { [cat: string]: typeof shoppingList });
 
-  const CATEGORY_SHOP_NAMES = {
-    meat_egg: 'Sạp thịt & trứng',
-    seafood: 'Sạp thủy hải sản',
-    vegetables: 'Sạp rau củ quả',
-    fruits: 'Sạp hoa quả',
-    dry_spice: 'Cửa hàng tạp hóa / Gia vị'
+  const CATEGORY_META: Record<string, { label: string; emoji: string; order: number }> = {
+    meat_egg:   { label: 'Sạp thịt & trứng',        emoji: '🥩', order: 1 },
+    seafood:    { label: 'Sạp thủy hải sản',         emoji: '🐟', order: 2 },
+    vegetables: { label: 'Sạp rau củ quả',           emoji: '🥬', order: 3 },
+    fruits:     { label: 'Hoa quả',                  emoji: '🍊', order: 4 },
+    dry_spice:  { label: 'Tạp hóa / Gia vị',         emoji: '🛒', order: 5 },
   };
 
   const selectedDayMenu = weeklyMenu[selectedDay];
@@ -486,20 +503,10 @@ export default function MenuPage() {
             const { proteinGrams, carbsGrams, fatGrams } = selectedDayMenu.nutritionSummary;
             return (
               <div className="card" style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {/* Row 1 — title + save */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    <Flame size={15} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-                    Dinh dưỡng {DAYS_OF_WEEK.find(d => d.id === selectedDay)?.name}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => { setFavName(`Thực đơn ngày ${DAYS_OF_WEEK.find(d => d.id === selectedDay)?.name}`); setShowSaveFav(true); }}
-                    style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '2px' }}
-                    title="Lưu yêu thích"
-                  >
-                    <Heart size={15} fill="var(--primary)" />
-                  </button>
+                {/* Row 1 — title */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  <Flame size={15} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                  Dinh dưỡng {DAYS_OF_WEEK.find(d => d.id === selectedDay)?.name}
                 </div>
 
                 {/* Row 2 — calories + bar */}
@@ -582,7 +589,7 @@ export default function MenuPage() {
                   </div>
 
                   {/* Dish cards */}
-                  {selectedDayMenu.meals[mealType].map((dish, idx) => (
+                  {(selectedDayMenu?.meals?.[mealType] ?? []).map((dish, idx) => (
                     <div key={idx} style={{
                       display: 'flex', alignItems: 'flex-start', gap: '10px',
                       padding: '10px 12px', marginBottom: '6px',
@@ -686,6 +693,35 @@ export default function MenuPage() {
                   <Trash2 size={14} /> Xóa
                 </button>
               </div>
+
+              {/* Save as template — only when all 3 meals have at least 1 dish */}
+              {(selectedDayMenu?.meals?.breakfast?.length ?? 0) > 0 &&
+               (selectedDayMenu?.meals?.lunch?.length ?? 0) > 0 &&
+               (selectedDayMenu?.meals?.dinner?.length ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setFavName(`Thực đơn ngày ${DAYS_OF_WEEK.find(d => d.id === selectedDay)?.name}`); setShowSaveFav(true); }}
+                  style={{
+                    width: '100%',
+                    marginTop: '8px',
+                    padding: '11px 16px',
+                    borderRadius: '12px',
+                    border: '1.5px dashed var(--primary-light)',
+                    background: 'var(--primary-bg)',
+                    color: 'var(--primary-dark)',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '7px',
+                  }}
+                >
+                  <Heart size={15} fill="var(--primary)" style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                  Lưu thực đơn hôm nay làm mẫu
+                </button>
+              )}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -753,59 +789,162 @@ export default function MenuPage() {
                   </button>
                 </div>
               ))}
+
             </div>
           )}
         </>
       ) : activeSubTab === 'shopping' ? (
         /* Shopping checklist */
         <div>
-          <div style={{ marginBottom: '16px' }}>
-            <h3 style={{ fontSize: '16px' }}>Danh sách đi chợ tuần này</h3>
-            <p style={{ fontSize: '12px' }}>Tự động tổng hợp từ thực đơn tuần của bạn. Đánh dấu để check off các thứ đã mua.</p>
-          </div>
-
           {shoppingList.length === 0 ? (
-            <p style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)' }}>Thực đơn tuần trống nên không có nguyên liệu cần mua.</p>
+            <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-secondary)' }}>
+              <ShoppingCart size={40} style={{ opacity: 0.3, marginBottom: '12px' }} />
+              <p style={{ fontSize: '14px', fontWeight: 600 }}>Chưa có danh sách đi chợ</p>
+              <p style={{ fontSize: '12px', marginTop: '4px' }}>Hãy tạo thực đơn tuần trước để tự động tổng hợp nguyên liệu cần mua.</p>
+            </div>
           ) : (
-            Object.keys(groupedShopping).map(catKey => (
-              <div key={catKey} className="card" style={{ padding: '12px 16px', marginBottom: '12px' }}>
-                <h4 style={{
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  color: 'var(--primary-dark)',
-                  borderBottom: '1px solid var(--border)',
-                  paddingBottom: '4px',
-                  marginBottom: '10px'
-                }}>
-                  {CATEGORY_SHOP_NAMES[catKey as keyof typeof CATEGORY_SHOP_NAMES]}
-                </h4>
+            <>
+              {/* Progress summary bar */}
+              {(() => {
+                const total = shoppingList.length;
+                const done = shoppingList.filter(i => purchasedIngredients.includes(i.id)).length;
+                const pct = Math.round((done / total) * 100);
+                return (
+                  <div className="card" style={{ padding: '14px 16px', marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        🛒 Đã mua <span style={{ color: 'var(--primary)' }}>{done}</span>/{total} mặt hàng
+                      </div>
+                      {done > 0 && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setPurchasedIngredients([]);
+                            await saveMenuToFirestore(weeklyMenu, []);
+                          }}
+                          style={{
+                            fontSize: '11px', fontWeight: 600,
+                            color: 'var(--text-secondary)',
+                            background: 'none', border: '1px solid var(--border)',
+                            borderRadius: '8px', padding: '3px 10px', cursor: 'pointer',
+                          }}
+                        >
+                          Xóa đã mua
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ height: '6px', backgroundColor: 'var(--bg-grey)', borderRadius: '99px', overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%', width: `${pct}%`,
+                        background: done === total ? 'var(--secondary)' : 'var(--primary)',
+                        borderRadius: '99px', transition: 'width 0.3s ease',
+                      }} />
+                    </div>
+                    {done === total && total > 0 && (
+                      <div style={{ fontSize: '12px', color: 'var(--secondary)', fontWeight: 600, marginTop: '6px', textAlign: 'center' }}>
+                        ✅ Đã mua đủ tất cả nguyên liệu!
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {groupedShopping[catKey].map(item => {
-                    const isPurchased = purchasedIngredients.includes(item.id);
-                    return (
+              {/* Category groups — sorted by order, unpurchased items first */}
+              {Object.keys(groupedShopping)
+                .sort((a, b) => (CATEGORY_META[a]?.order ?? 9) - (CATEGORY_META[b]?.order ?? 9))
+                .map(catKey => {
+                  const catMeta = CATEGORY_META[catKey] ?? { label: catKey, emoji: '📦', order: 9 };
+                  const items = [...groupedShopping[catKey]].sort((a, b) => {
+                    const aP = purchasedIngredients.includes(a.id) ? 1 : 0;
+                    const bP = purchasedIngredients.includes(b.id) ? 1 : 0;
+                    return aP - bP;
+                  });
+                  const catDone = items.filter(i => purchasedIngredients.includes(i.id)).length;
+
+                  const isCollapsed = collapsedCategories.has(catKey);
+                  return (
+                    <div key={catKey} className="card" style={{ padding: '0', marginBottom: '10px', overflow: 'hidden' }}>
+                      {/* Category header — tap to collapse/expand */}
                       <div
-                        key={item.id}
-                        onClick={() => handleTogglePurchased(item.id)}
+                        onClick={() => toggleCategory(catKey)}
                         style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '10px',
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '11px 16px',
+                          backgroundColor: 'var(--primary-bg)',
+                          borderBottom: isCollapsed ? 'none' : '1px solid var(--border)',
                           cursor: 'pointer',
-                          fontSize: '14px',
-                          textDecoration: isPurchased ? 'line-through' : 'none',
-                          color: isPurchased ? 'var(--text-secondary)' : 'var(--text-primary)',
-                          padding: '4px 0'
+                          userSelect: 'none',
                         }}
                       >
-                        {isPurchased ? <CheckSquare size={18} style={{ color: 'var(--primary)' }} /> : <Square size={18} />}
-                        <span>{item.name} <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>(Dùng {item.frequency} lần)</span></span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {isCollapsed
+                            ? <ChevronRight size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                            : <ChevronDown size={14} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                          }
+                          <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--primary-dark)' }}>
+                            {catMeta.emoji} {catMeta.label}
+                          </span>
+                        </div>
+                        <span style={{
+                          fontSize: '11px', fontWeight: 600,
+                          color: catDone === items.length ? 'var(--secondary)' : 'var(--text-secondary)',
+                          background: 'var(--bg-grey)', borderRadius: '12px', padding: '2px 8px',
+                        }}>
+                          {catDone}/{items.length}
+                        </span>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))
+
+                      {/* Items — hidden when collapsed */}
+                      {!isCollapsed && (
+                        <div style={{ padding: '6px 0' }}>
+                          {items.map((item, idx) => {
+                            const isPurchased = purchasedIngredients.includes(item.id);
+                            return (
+                              <div
+                                key={item.id}
+                                onClick={() => handleTogglePurchased(item.id)}
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: '12px',
+                                  padding: '10px 16px',
+                                  cursor: 'pointer',
+                                  borderTop: idx > 0 ? '1px solid var(--border)' : 'none',
+                                  backgroundColor: isPurchased ? 'rgba(129,178,154,0.06)' : 'transparent',
+                                  transition: 'background 0.15s',
+                                }}
+                              >
+                                {isPurchased
+                                  ? <CheckSquare size={20} style={{ color: 'var(--secondary)', flexShrink: 0 }} />
+                                  : <Square size={20} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                                }
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <span style={{
+                                    fontSize: '14px', fontWeight: 500,
+                                    color: isPurchased ? 'var(--text-secondary)' : 'var(--text-primary)',
+                                    textDecoration: isPurchased ? 'line-through' : 'none',
+                                  }}>
+                                    {item.name}
+                                  </span>
+                                </div>
+                                <span style={{
+                                  fontSize: '11px', fontWeight: 600,
+                                  color: 'var(--text-secondary)',
+                                  background: 'var(--bg-grey)',
+                                  borderRadius: '10px', padding: '2px 8px',
+                                  flexShrink: 0,
+                                  opacity: isPurchased ? 0.5 : 1,
+                                }}>
+                                  {item.frequency} buổi
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              }
+            </>
           )}
         </div>
       ) : (

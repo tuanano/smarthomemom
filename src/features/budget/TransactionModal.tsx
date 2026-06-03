@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { useToast } from '../../components/Toast';
 import { useFamilyStore } from '../../stores/familyStore';
 import { getMergedCategories } from '../../core/constants';
 import type { Transaction } from '../../types';
@@ -16,6 +17,7 @@ interface TransactionModalProps {
 export default function TransactionModal({ isOpen, onClose, transactionToEdit, defaultWalletId }: TransactionModalProps) {
   const { family, wallets, createTransaction, updateTransaction, deleteTransaction, customCategories } = useFamilyStore();
   const confirm = useConfirm();
+  const showToast = useToast();
   
   const mergedCategories = useMemo(() => getMergedCategories(customCategories), [customCategories]);
   
@@ -198,16 +200,16 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
     let finalNote = note.trim();
 
     if (finalAmount <= 0) {
-      alert("Vui lòng nhập số tiền lớn hơn 0");
+      showToast("Vui lòng nhập số tiền lớn hơn 0", "warning");
       return;
     }
 
     if (!selectedWalletId) {
-      alert("Vui lòng chọn ví thanh toán");
+      showToast("Vui lòng chọn ví thanh toán", "warning");
       return;
     }
     if (type === 'transfer' && selectedWalletId === targetWalletId) {
-      alert("Ví chuyển và ví nhận phải khác nhau");
+      showToast("Ví chuyển và ví nhận phải khác nhau", "warning");
       return;
     }
 
@@ -242,7 +244,7 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
       onClose();
     } catch (err) {
       console.error(err);
-      alert(transactionToEdit ? "Lỗi khi cập nhật giao dịch" : "Lỗi khi thêm giao dịch");
+      showToast(transactionToEdit ? "Lỗi khi cập nhật giao dịch" : "Lỗi khi thêm giao dịch", "error");
     }
   };
 
@@ -260,7 +262,7 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
         onClose();
       } catch (err) {
         console.error(err);
-        alert('Lỗi khi xóa giao dịch');
+        showToast('Lỗi khi xóa giao dịch', 'error');
       }
     }
   };

@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useConfirm } from './components/ConfirmDialog';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './firebase';
 import { useAuthStore } from './stores/authStore';
 import { useFamilyStore } from './stores/familyStore';
@@ -10,7 +9,8 @@ import DashboardPage from './features/dashboard/DashboardPage';
 import MenuPage from './features/menu/MenuPage';
 import LocalPantry from './features/menu/LocalPantry';
 import SettingsPage from './features/settings/SettingsPage';
-import { Wallet, ChefHat, ShoppingBasket, LogOut, Loader2, Sparkles, Settings } from 'lucide-react';
+import TransactionModal from './features/budget/TransactionModal';
+import { Wallet, ChefHat, ShoppingBasket, Loader2, Settings, Plus } from 'lucide-react';
 
 export default function App() {
   const { user, loading, setUser, setLoading } = useAuthStore();
@@ -33,9 +33,7 @@ export default function App() {
   } = useFamilyStore();
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'menu' | 'pantry' | 'settings'>('dashboard');
-  const confirm = useConfirm();
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showInstallBtn, setShowInstallBtn] = useState(false);
+  const [addModalOpen, setAddModalOpen] = useState(false);
 
   // Auth Listener
   useEffect(() => {
@@ -78,44 +76,6 @@ export default function App() {
     };
   }, [user]);
 
-  // Capture PWA Install event
-  useEffect(() => {
-    const handleBeforeInstallPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setShowInstallBtn(true);
-    };
-
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
-  }, []);
-
-  const handleInstallPWA = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      console.log('User accepted the PWA install prompt');
-    }
-    setDeferredPrompt(null);
-    setShowInstallBtn(false);
-  };
-
-  const handleSignOut = async () => {
-    const yes = await confirm({
-      title: 'Đăng xuất',
-      message: 'Bạn có muốn đăng xuất khỏi tài khoản?',
-      confirmText: 'Đăng xuất',
-      variant: 'warning'
-    });
-    if (yes) {
-      await signOut(auth);
-    }
-  };
-
   // Loading Screen — wait for both auth AND first Firestore snapshot
   if (loading || (user && familyLoading)) {
     return (
@@ -129,7 +89,7 @@ export default function App() {
         gap: '16px'
       }}>
         <Loader2 size={36} className="spin" style={{ color: 'var(--primary)' }} />
-        <p style={{ fontWeight: 600 }}>Đang chuẩn bị căn bế...</p>
+        <p style={{ fontWeight: 600 }}>Đang chuẩn bị dữ liệu...</p>
       </div>
     );
   }
@@ -146,70 +106,7 @@ export default function App() {
 
   return (
     <>
-      {/* Top Header */}
-      <header style={{
-        height: '56px',
-        backgroundColor: 'var(--bg-card)',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: '0 20px',
-        zIndex: 10
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <h2 style={{ fontSize: '16px', color: 'var(--primary-dark)', fontWeight: 800 }}>SmartHomeMom</h2>
-          {user.isAnonymous && (
-            <span style={{
-              fontSize: '10px',
-              backgroundColor: 'var(--primary-bg)',
-              color: 'var(--primary)',
-              padding: '2px 6px',
-              borderRadius: '10px',
-              fontWeight: 700
-            }}>Demo</span>
-          )}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {showInstallBtn && (
-            <button
-              onClick={handleInstallPWA}
-              style={{
-                background: 'var(--primary-bg)',
-                color: 'var(--primary)',
-                border: '1px solid var(--primary-light)',
-                padding: '4px 10px',
-                borderRadius: '12px',
-                fontSize: '11px',
-                fontWeight: 700,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                cursor: 'pointer'
-              }}
-            >
-              <Sparkles size={12} /> Cài đặt App
-            </button>
-          )}
-          <button
-            onClick={handleSignOut}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              padding: '6px'
-            }}
-            title="Đăng xuất"
-          >
-            <LogOut size={18} />
-          </button>
-        </div>
-      </header>
-
-      {/* Main Content Area */}
+      {/* Main Content Area — full height, no header */}
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         {activeTab === 'dashboard' && <DashboardPage />}
         {activeTab === 'menu' && <MenuPage />}
@@ -217,7 +114,7 @@ export default function App() {
         {activeTab === 'settings' && <SettingsPage />}
       </main>
 
-      {/* PWA Shell Bottom Navigation Tabs */}
+      {/* Bottom Navigation with center FAB */}
       <nav className="bottom-nav">
         <button
           onClick={() => setActiveTab('dashboard')}
@@ -233,6 +130,29 @@ export default function App() {
           <ChefHat size={20} />
           <span>Thực Đơn</span>
         </button>
+
+        {/* Center FAB — add transaction */}
+        <button
+          onClick={() => setAddModalOpen(true)}
+          style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)',
+            color: 'white',
+            border: '3px solid var(--bg-cream)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 4px 16px rgba(255, 140, 105, 0.45)',
+            marginTop: '-20px',
+            flexShrink: 0,
+          }}
+        >
+          <Plus size={26} />
+        </button>
+
         <button
           onClick={() => setActiveTab('pantry')}
           className={`bottom-nav-item ${activeTab === 'pantry' ? 'active' : ''}`}
@@ -249,15 +169,13 @@ export default function App() {
         </button>
       </nav>
 
-      {/* Custom micro animation CSS injected inline */}
+      {/* Global add-transaction modal (triggered from bottom nav +) */}
+      <TransactionModal
+        isOpen={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+      />
+
       <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg); }
-          100% { transform: rotate(360deg); }
-        }
-        .spin {
-          animation: spin 1.5s linear infinite;
-        }
         .bottom-nav-item:active {
           transform: scale(0.92);
           transition: transform 0.1s ease;

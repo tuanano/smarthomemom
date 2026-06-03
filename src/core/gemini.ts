@@ -120,10 +120,19 @@ export async function generateDailyMenu(req: SuggestionRequest): Promise<DailyMe
   const customIngredients = useFamilyStore.getState().customIngredients || [];
   const allIngredients = [...DEFAULT_INGREDIENTS, ...customIngredients];
 
+  const availableIdNameMap = req.availableIngredients
+    .map(id => {
+      const ing = allIngredients.find(i => i.id === id);
+      return ing ? `"${ing.id}": "${ing.name}"` : null;
+    })
+    .filter(Boolean)
+    .join(', ');
+
   const prompt = `
 Bạn là chuyên gia dinh dưỡng Việt Nam. Thiết kế thực đơn 3 bữa trong ngày, đáp ứng:
 1. Nhu cầu Calo MỖI NGƯỜI: ${req.dailyCalorieTarget} Kcal/ngày. Tổng calories các món phải gần mức này.
-2. CHỈ dùng nguyên liệu: [${req.availableIngredients.map(id => allIngredients.find(i => i.id === id)?.name || id).join(', ')}].
+2. CHỈ dùng nguyên liệu từ danh sách sau. Trong ingredientsUsed chỉ được dùng ĐÚNG ID (không tự đặt id mới):
+   { ${availableIdNameMap} }
 3. Tránh lặp: [${req.recentMeals.slice(0, 15).join(', ')}].
 
 QUAN TRỌNG: calories mỗi món = Kcal CHO 1 NGƯỜI (1 khẩu phần). Ví dụ: cháo/canh 80-200, phở/bún 400-550, cơm tấm 500-650, kho/chiên 300-450.
@@ -172,7 +181,6 @@ export async function generateMealSuggestions(req: MealSuggestionRequest): Promi
 
   const customIngredients = useFamilyStore.getState().customIngredients || [];
   const allIngredients = [...DEFAULT_INGREDIENTS, ...customIngredients];
-  const ingName = (id: string) => allIngredients.find(i => i.id === id)?.name || id;
 
   const mealTypeVN = req.mealType === 'breakfast' ? 'bữa sáng' : req.mealType === 'lunch' ? 'bữa trưa' : 'bữa tối';
   const prefVN: Record<FoodPreference, string> = {
@@ -185,10 +193,18 @@ export async function generateMealSuggestions(req: MealSuggestionRequest): Promi
     chay: 'món chay (không thịt, đậu hũ, nấm, rau củ)',
   };
 
+  const availableIdNameMap2 = req.availableIngredients
+    .map(id => {
+      const ing = allIngredients.find(i => i.id === id);
+      return ing ? `"${ing.id}": "${ing.name}"` : null;
+    })
+    .filter(Boolean)
+    .join(', ');
+
   const prompt = `
 Bạn là chuyên gia dinh dưỡng Việt Nam. Gợi ý 3 món ăn cho ${mealTypeVN} của gia đình ${req.familySize} người.
 Loại món ưu tiên: ${prefVN[req.preference]}.
-Nguyên liệu có sẵn: [${req.availableIngredients.map(ingName).join(', ')}].
+Nguyên liệu có sẵn (chỉ dùng đúng id, không tự đặt id mới): { ${availableIdNameMap2} }
 Tránh trùng: [${req.recentMeals.slice(0, 10).join(', ')}].
 
 YÊU CẦU: calories = Kcal CHO 1 NGƯỜI ĂN (1 khẩu phần). Mức tham khảo: cháo/canh ≈ 80-200, phở/bún ≈ 400-550, cơm tấm/cơm chiên ≈ 500-650, kho/chiên/xào ≈ 300-450, lẩu ≈ 600-800.
