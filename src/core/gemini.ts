@@ -1,5 +1,4 @@
 import { useFamilyStore } from '../stores/familyStore';
-import { DEFAULT_INGREDIENTS } from './constants';
 
 interface SuggestionRequest {
   dailyCalorieTarget: number;
@@ -118,7 +117,7 @@ export async function generateDailyMenu(req: SuggestionRequest): Promise<DailyMe
   if (!apiKey || apiKey === 'mock-gemini-key') return generateMockMenu(req);
 
   const customIngredients = useFamilyStore.getState().customIngredients || [];
-  const allIngredients = [...DEFAULT_INGREDIENTS, ...customIngredients];
+  const allIngredients = customIngredients;
 
   const availableIdNameMap = req.availableIngredients
     .map(id => {
@@ -180,7 +179,7 @@ export async function generateMealSuggestions(req: MealSuggestionRequest): Promi
   if (!apiKey || apiKey === 'mock-gemini-key') return generateMockMealSuggestions(req);
 
   const customIngredients = useFamilyStore.getState().customIngredients || [];
-  const allIngredients = [...DEFAULT_INGREDIENTS, ...customIngredients];
+  const allIngredients = customIngredients;
 
   const mealTypeVN = req.mealType === 'breakfast' ? 'bữa sáng' : req.mealType === 'lunch' ? 'bữa trưa' : 'bữa tối';
   const prefVN: Record<FoodPreference, string> = {

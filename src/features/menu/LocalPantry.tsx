@@ -1,6 +1,5 @@
 import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
-import { getMergedIngredients } from '../../core/constants';
 import { Check, Info, ShoppingBasket } from 'lucide-react';
 import PullToRefresh from '../../components/PullToRefresh';
 
@@ -16,8 +15,6 @@ export default function LocalPantry() {
   const { user } = useAuthStore();
   const { availableIngredients, saveIngredients, customIngredients } = useFamilyStore();
   
-  const mergedIngredients = getMergedIngredients(customIngredients);
-
   const handleRefresh = async () => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   };
@@ -41,7 +38,7 @@ export default function LocalPantry() {
 
   const selectAll = async () => {
     if (!user) return;
-    const allIds = mergedIngredients.map(i => i.id);
+    const allIds = customIngredients.map(i => i.id);
     await saveIngredients(user.uid, allIds);
   };
 
@@ -51,7 +48,7 @@ export default function LocalPantry() {
   };
 
   // Group ingredients
-  const grouped = mergedIngredients.reduce((acc, ing) => {
+  const grouped = customIngredients.reduce((acc, ing) => {
     acc[ing.category] = acc[ing.category] || [];
     acc[ing.category].push(ing);
     return acc;

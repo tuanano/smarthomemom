@@ -7,7 +7,6 @@ import { generateDailyMenu } from '../../core/gemini';
 import type { DailyMenuResponse, Meal } from '../../core/gemini';
 import AddMealModal from './AddMealModal';
 import RecipeGuideModal from './RecipeGuideModal';
-import { getMergedIngredients } from '../../core/constants';
 import { db } from '../../firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { Flame, ShoppingCart, Sparkles, CheckSquare, Square, ChefHat, Heart, Trash2, Plus, X, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
@@ -168,7 +167,7 @@ export default function MenuPage() {
       });
     });
 
-    const mergedIngredients = getMergedIngredients(customIngredients);
+    const mergedIngredients = customIngredients;
 
     // Deduplicate by canonical name (case-insensitive) — merge AI-invented IDs that map to same ingredient
     const seen = new Map<string, { id: string; name: string; category: string; frequency: number }>();

@@ -251,7 +251,7 @@ export default function BudgetDetailPage({ budget, transactions, onBack }: Props
               color: 'var(--text-primary)'
             },
             {
-              label: 'Carry Over',
+              label: 'Dư/Thiếu hôm trước',
               value: `${accumulatedBalance >= 0 ? '+' : ''}${fmtVND(Math.round(accumulatedBalance))}`,
               color: accumulatedBalance >= 0 ? '#81B29A' : '#E63946'
             },
@@ -413,7 +413,7 @@ export default function BudgetDetailPage({ budget, transactions, onBack }: Props
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px', minWidth: '340px' }}>
             <thead>
               <tr>
-                {['Ngày', 'Carry Over', 'Khả dụng', 'Thực chi', 'Chênh lệch', ''].map((h, i) => (
+                {['Ngày', 'Dư/Thiếu', 'Khả dụng', 'Thực chi', 'Chênh lệch', ''].map((h, i) => (
                   <th
                     key={i}
                     style={{
