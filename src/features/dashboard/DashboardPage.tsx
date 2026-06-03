@@ -5,7 +5,7 @@ import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
 import type { Budget, Transaction } from '../../types';
 import { getMergedCategories } from '../../core/constants';
-import { Plus, Wallet as WalletIcon, TrendingDown, TrendingUp, AlertTriangle, Trash2, PiggyBank, ArrowRightLeft, ChevronRight, ArrowLeft, Search, MoreVertical } from 'lucide-react';
+import { Plus, Wallet as WalletIcon, TrendingDown, TrendingUp, AlertTriangle, Trash2, PiggyBank, Coins, CreditCard, ArrowRightLeft, ChevronRight, ArrowLeft, Search, MoreVertical, HelpCircle } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { format } from 'date-fns';
 import TransactionModal from '../budget/TransactionModal';
@@ -492,55 +492,69 @@ export default function DashboardPage() {
             </div>
 
             {/* Wallets detail */}
-            <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px', marginBottom: '20px' }}>
-              {wallets.map(w => (
-                <div 
-                  key={w.walletId} 
-                  className="card" 
-                  onClick={() => {
-                    setSelectedWalletIdForDetail(w.walletId);
-                    setView('wallet_detail');
-                  }}
-                  style={{
-                    margin: 0,
-                    flex: '0 0 160px',
-                    padding: '12px',
-                    borderColor: w.colorCode,
-                    borderWidth: '2px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{
-                      width: '32px',
-                      height: '32px',
-                      borderRadius: '8px',
-                      backgroundColor: `${w.colorCode}22`,
-                      color: w.colorCode,
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
+              {wallets.map(w => {
+                const WalIcon = w.type === 'cash' ? Coins : w.type === 'bank' ? CreditCard : PiggyBank;
+                const isSaving = w.includeInBalance === false;
+                return (
+                  <div
+                    key={w.walletId}
+                    onClick={() => {
+                      setSelectedWalletIdForDetail(w.walletId);
+                      setView('wallet_detail');
+                    }}
+                    style={{
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'center'
+                      gap: '12px',
+                      padding: '12px 14px',
+                      borderRadius: '14px',
+                      border: '1px solid var(--border)',
+                      borderLeft: `4px solid ${w.colorCode}`,
+                      backgroundColor: 'var(--bg-card)',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {/* Icon */}
+                    <div style={{
+                      width: '40px', height: '40px', borderRadius: '10px', flexShrink: 0,
+                      backgroundColor: `${w.colorCode}22`, color: w.colorCode,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
                     }}>
-                      <PiggyBank size={18} />
+                      <WalIcon size={20} />
                     </div>
-                    <div>
-                      <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>{w.name.split(' ')[0]}</span>
-                      {w.includeInBalance === false && (
-                        <div style={{ fontSize: '9px', color: '#71717a', fontWeight: 600 }}>Lưu trữ</div>
-                      )}
+
+                    {/* Name + type */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                      }}>{w.name}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span>{w.type === 'cash' ? 'Tiền mặt' : w.type === 'bank' ? 'Thẻ/Ngân hàng' : 'Ví điện tử'}</span>
+                        {isSaving && (
+                          <>
+                            <span>·</span>
+                            <span style={{ color: '#71717a', fontWeight: 600 }}>Tiết kiệm</span>
+                          </>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Balance */}
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-primary)' }}>
+                        {w.balance.toLocaleString('vi-VN')}đ
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                        {isSaving ? 'Tiết kiệm' : 'Số dư'}
+                      </div>
+                    </div>
+
+                    <ChevronRight size={16} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
                   </div>
-                  <div>
-                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
-                      {w.includeInBalance === false ? 'Tiết kiệm' : 'Số dư'}
-                    </div>
-                    <div style={{ fontSize: '14px', fontWeight: 800 }}>{w.balance.toLocaleString('vi-VN')}đ</div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Budget Alerts Section */}
@@ -587,9 +601,14 @@ export default function DashboardPage() {
               {budgets.map(b => {
                 const spent = getCategorySpent(b.category);
                 const ratio = b.limitAmount > 0 ? spent / b.limitAmount : 0;
-                let color = 'var(--secondary)';
-                if (ratio >= 0.9) color = 'var(--danger)';
-                else if (ratio >= 0.7) color = 'var(--accent)';
+                const pct = Math.min(ratio * 100, 100);
+                let statusColor = 'var(--secondary)';
+                if (ratio >= 0.9) statusColor = 'var(--danger)';
+                else if (ratio >= 0.7) statusColor = 'var(--accent)';
+
+                const catMeta = mergedCategories.find(c => c.name === b.category);
+                const CatIcon = catMeta?.icon || HelpCircle;
+                const catColor = catMeta?.color || 'var(--primary)';
 
                 return (
                   <div
@@ -599,22 +618,52 @@ export default function DashboardPage() {
                       setSelectedBudgetForDetail(b);
                       setView('budget_detail');
                     }}
-                    style={{ marginBottom: '10px', padding: '12px 16px', cursor: 'pointer' }}
+                    style={{ marginBottom: '10px', padding: '14px 16px', cursor: 'pointer' }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}>
-                      <span>{b.category}</span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ color }}>{spent.toLocaleString('vi-VN')} / {b.limitAmount.toLocaleString('vi-VN')} đ</span>
-                        <ChevronRight size={15} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                    {/* Header row: icon + name + percent badge + chevron */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                      <div style={{
+                        width: '38px', height: '38px', borderRadius: '10px', flexShrink: 0,
+                        backgroundColor: `${catColor}22`, color: catColor,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}>
+                        <CatIcon size={18} />
+                      </div>
+
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                        }}>{b.category}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                          Đã chi: <span style={{ color: statusColor, fontWeight: 700 }}>{spent.toLocaleString('vi-VN')}đ</span>
+                          {' / '}{b.limitAmount.toLocaleString('vi-VN')}đ
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                        <span style={{
+                          fontSize: '12px', fontWeight: 800, color: statusColor,
+                          backgroundColor: `${statusColor === 'var(--secondary)' ? '#81B29A' : statusColor === 'var(--accent)' ? '#FFB703' : '#E63946'}18`,
+                          padding: '2px 8px', borderRadius: '8px'
+                        }}>{pct.toFixed(0)}%</span>
+                        <ChevronRight size={15} style={{ color: 'var(--text-secondary)' }} />
                       </div>
                     </div>
-                    <div style={{ height: '8px', backgroundColor: 'var(--bg-grey)', borderRadius: '4px', overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${Math.min(ratio * 100, 100)}%`, backgroundColor: color, borderRadius: '4px', transition: 'width 0.3s ease' }}></div>
+
+                    {/* Progress bar */}
+                    <div style={{ height: '6px', backgroundColor: 'var(--bg-grey)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%', width: `${pct}%`,
+                        backgroundColor: statusColor, borderRadius: '3px',
+                        transition: 'width 0.3s ease'
+                      }} />
                     </div>
+
                     {ratio >= 0.8 && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--danger)', fontSize: '11px', marginTop: '6px', fontWeight: 600 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: 'var(--danger)', fontSize: '11px', marginTop: '8px', fontWeight: 600 }}>
                         <AlertTriangle size={12} />
-                        <span>Cảnh báo: Đã tiêu vượt {(ratio * 100).toFixed(0)}% hạn mức!</span>
+                        <span>Đã dùng {pct.toFixed(0)}% hạn mức — cần kiểm soát chi tiêu!</span>
                       </div>
                     )}
                   </div>

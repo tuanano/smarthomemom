@@ -14,16 +14,14 @@ import { Wallet, ChefHat, ShoppingBasket, LogOut, Loader2, Sparkles, Settings } 
 
 export default function App() {
   const { user, loading, setUser, setLoading } = useAuthStore();
-  const { 
+  const {
     family,
+    familyLoading,
     subscribeFamily,
     subscribeWallets,
     subscribeTransactions,
     subscribeBudgets,
     subscribeIngredients,
-    subscribeCustomCategories,
-    subscribeCustomIngredients,
-    subscribeFavoriteMenus,
     setFamily,
     setWallets,
     setTransactions,
@@ -31,7 +29,7 @@ export default function App() {
     setAvailableIngredients,
     setCustomCategories,
     setCustomIngredients,
-    setFavoriteMenus
+    setFavoriteMenus,
   } = useFamilyStore();
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'menu' | 'pantry' | 'settings'>('dashboard');
@@ -55,6 +53,8 @@ export default function App() {
         setCustomCategories([]);
         setCustomIngredients([]);
         setFavoriteMenus([]);
+        // Reset familyLoading so next login waits for Firestore before showing Onboarding
+        useFamilyStore.setState({ familyLoading: true });
       }
     });
   }, []);
@@ -68,9 +68,6 @@ export default function App() {
     const unsubTrans = subscribeTransactions(user.uid);
     const unsubBudgets = subscribeBudgets(user.uid);
     const unsubIng = subscribeIngredients(user.uid);
-    const unsubCustomCat = subscribeCustomCategories(user.uid);
-    const unsubCustomIng = subscribeCustomIngredients(user.uid);
-    const unsubFavMenu = subscribeFavoriteMenus(user.uid);
 
     return () => {
       unsubFamily();
@@ -78,9 +75,6 @@ export default function App() {
       unsubTrans();
       unsubBudgets();
       unsubIng();
-      unsubCustomCat();
-      unsubCustomIng();
-      unsubFavMenu();
     };
   }, [user]);
 
@@ -122,8 +116,8 @@ export default function App() {
     }
   };
 
-  // Loading Screen
-  if (loading) {
+  // Loading Screen — wait for both auth AND first Firestore snapshot
+  if (loading || (user && familyLoading)) {
     return (
       <div style={{
         height: '100vh',
@@ -135,7 +129,7 @@ export default function App() {
         gap: '16px'
       }}>
         <Loader2 size={36} className="spin" style={{ color: 'var(--primary)' }} />
-        <p style={{ fontWeight: 600 }}>Đang chuẩn bị căn bếp...</p>
+        <p style={{ fontWeight: 600 }}>Đang chuẩn bị căn bế...</p>
       </div>
     );
   }
@@ -145,7 +139,7 @@ export default function App() {
     return <AuthPage />;
   }
 
-  // Onboarding Screen
+  // Onboarding Screen — only shown when Firestore confirmed no family doc exists
   if (!family) {
     return <OnboardingPage />;
   }

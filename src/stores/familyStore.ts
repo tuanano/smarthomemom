@@ -15,11 +15,12 @@ import { DEFAULT_CATEGORIES, DEFAULT_INGREDIENTS } from '../core/constants';
 
 interface FamilyState {
   family: Family | null;
+  familyLoading: boolean;
   wallets: Wallet[];
   transactions: Transaction[];
   budgets: Budget[];
   availableIngredients: string[];
-  
+
   // Setters
   setFamily: (family: Family | null) => void;
   setWallets: (wallets: Wallet[]) => void;
@@ -33,6 +34,8 @@ interface FamilyState {
   subscribeTransactions: (familyId: string) => () => void;
   subscribeBudgets: (familyId: string) => () => void;
   subscribeIngredients: (familyId: string) => () => void;
+  // Note: customCategories, customIngredients, favoriteMenus are embedded in the family
+  // document and loaded by subscribeFamily — no separate subscriptions needed.
   
   // Database Actions
   saveFamily: (family: Family) => Promise<void>;
@@ -53,21 +56,19 @@ interface FamilyState {
   setCustomIngredients: (ingredients: CustomIngredient[]) => void;
   setFavoriteMenus: (menus: FavoriteMenu[]) => void;
 
-  subscribeCustomCategories: (familyId: string) => () => void;
   addCustomCategory: (familyId: string, category: CustomCategory) => Promise<void>;
   deleteCustomCategory: (familyId: string, catId: string) => Promise<void>;
 
-  subscribeCustomIngredients: (familyId: string) => () => void;
   addCustomIngredient: (familyId: string, ingredient: CustomIngredient) => Promise<void>;
   deleteCustomIngredient: (familyId: string, ingId: string) => Promise<void>;
 
-  subscribeFavoriteMenus: (familyId: string) => () => void;
   saveFavoriteMenu: (familyId: string, favMenu: FavoriteMenu) => Promise<void>;
   deleteFavoriteMenu: (familyId: string, favMenuId: string) => Promise<void>;
 }
 
 export const useFamilyStore = create<FamilyState>((set, get) => ({
   family: null,
+  familyLoading: true,
   wallets: [],
   transactions: [],
   budgets: [],
@@ -86,16 +87,17 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   setFavoriteMenus: (favoriteMenus) => set({ favoriteMenus }),
   
   subscribeFamily: (familyId) => {
+    set({ familyLoading: true });
     return onSnapshot(doc(db, 'families', familyId), (docSnap) => {
       if (docSnap.exists()) {
         const familyData = docSnap.data() as Family;
-        const categories = familyData.customCategories && familyData.customCategories.length > 0 
-          ? familyData.customCategories 
+        const categories = familyData.customCategories && familyData.customCategories.length > 0
+          ? familyData.customCategories
           : DEFAULT_CATEGORIES;
         const ingredients = familyData.customIngredients && familyData.customIngredients.length > 0
           ? familyData.customIngredients
           : DEFAULT_INGREDIENTS;
-        set({ 
+        set({
           family: {
             ...familyData,
             customCategories: categories,
@@ -103,21 +105,24 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
           },
           customCategories: categories,
           customIngredients: ingredients,
-          favoriteMenus: familyData.favoriteMenus || []
+          favoriteMenus: familyData.favoriteMenus || [],
+          familyLoading: false,
         });
       } else {
-        set({ 
+        set({
           family: null,
           customCategories: [],
           customIngredients: [],
-          favoriteMenus: []
+          favoriteMenus: [],
+          familyLoading: false,
         });
       }
     });
   },
   
   subscribeWallets: (familyId) => {
-    return onSnapshot(collection(db, 'families', familyId, 'wallets'), (snapshot) => {
+    const q = query(collection(db, 'families', familyId, 'wallets'), orderBy('createdAt', 'asc'));
+    return onSnapshot(q, (snapshot) => {
       const walletsList = snapshot.docs.map(doc => doc.data() as Wallet);
       set({ wallets: walletsList });
     });
@@ -151,18 +156,6 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     });
   },
 
-  subscribeCustomCategories: (_familyId) => {
-    return () => {};
-  },
-
-  subscribeCustomIngredients: (_familyId) => {
-    return () => {};
-  },
-
-  subscribeFavoriteMenus: (_familyId) => {
-    return () => {};
-  },
-  
   saveFamily: async (family) => {
     await setDoc(doc(db, 'families', family.familyId), family);
     set({ family });

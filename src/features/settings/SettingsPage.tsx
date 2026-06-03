@@ -3,11 +3,137 @@ import CurrencyInput from '../../components/CurrencyInput';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
-import { getMergedCategories } from '../../core/constants';
 import type { FamilyMember, Wallet, Budget, CustomCategory, CustomIngredient } from '../../types';
-import { Users, PiggyBank, Settings, Coins, CreditCard, Plus, Trash2, Flame, Save, LogOut, Tag, Apple, HelpCircle, ChevronRight, User, ArrowLeft, Calculator, Pencil, SlidersHorizontal, Star, UserCheck, Check } from 'lucide-react';
+import { Users, PiggyBank, Settings, Coins, CreditCard, Plus, Trash2, Flame, Save, LogOut, Tag, Apple, HelpCircle, ChevronRight, ChevronDown, User, ArrowLeft, Calculator, Pencil, SlidersHorizontal, Star, UserCheck, Check } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../../firebase';
+import { getMergedCategories, ICON_MAP } from '../../core/constants';
+
+const ICON_OPTIONS: { name: string; label: string }[] = [
+  { name: 'Utensils', label: 'Ăn uống' },
+  { name: 'UtensilsCrossed', label: 'Nhà hàng' },
+  { name: 'Coffee', label: 'Cà phê' },
+  { name: 'Wine', label: 'Đồ uống' },
+  { name: 'ShoppingBag', label: 'Mua sắm' },
+  { name: 'ShoppingCart', label: 'Siêu thị' },
+  { name: 'Shirt', label: 'Quần áo' },
+  { name: 'Scissors', label: 'Cắt tóc' },
+  { name: 'Sparkles', label: 'Làm đẹp' },
+  { name: 'Car', label: 'Xe hơi' },
+  { name: 'Bike', label: 'Xe máy' },
+  { name: 'Bus', label: 'Xe buýt' },
+  { name: 'Plane', label: 'Máy bay' },
+  { name: 'Fuel', label: 'Xăng dầu' },
+  { name: 'Home', label: 'Nhà ở' },
+  { name: 'Lightbulb', label: 'Điện' },
+  { name: 'Droplets', label: 'Nước' },
+  { name: 'Wifi', label: 'Internet' },
+  { name: 'Zap', label: 'Gas/Điện' },
+  { name: 'Flame', label: 'Gas' },
+  { name: 'Sofa', label: 'Nội thất' },
+  { name: 'Wrench', label: 'Sửa chữa' },
+  { name: 'HeartPulse', label: 'Sức khỏe' },
+  { name: 'Pill', label: 'Thuốc' },
+  { name: 'Stethoscope', label: 'Bác sĩ' },
+  { name: 'Dumbbell', label: 'Thể dục' },
+  { name: 'Activity', label: 'Hoạt động' },
+  { name: 'GraduationCap', label: 'Học phí' },
+  { name: 'BookOpen', label: 'Sách vở' },
+  { name: 'Laptop', label: 'Máy tính' },
+  { name: 'Briefcase', label: 'Công việc' },
+  { name: 'Tv', label: 'Giải trí' },
+  { name: 'Music', label: 'Âm nhạc' },
+  { name: 'Gamepad2', label: 'Game' },
+  { name: 'Camera', label: 'Ảnh/Video' },
+  { name: 'Film', label: 'Phim' },
+  { name: 'Baby', label: 'Trẻ em' },
+  { name: 'Gift', label: 'Quà tặng' },
+  { name: 'Heart', label: 'Tình cảm' },
+  { name: 'PartyPopper', label: 'Lễ tiệc' },
+  { name: 'Phone', label: 'Điện thoại' },
+  { name: 'Globe', label: 'Quốc tế' },
+  { name: 'Leaf', label: 'Môi trường' },
+  { name: 'Package', label: 'Đơn hàng' },
+  { name: 'PiggyBank', label: 'Tiết kiệm' },
+  { name: 'TrendingUp', label: 'Đầu tư' },
+  { name: 'DollarSign', label: 'Thu nhập' },
+  { name: 'Wallet', label: 'Ví tiền' },
+  { name: 'BarChart3', label: 'Tài chính' },
+  { name: 'HelpCircle', label: 'Khác' },
+];
+
+function IconPicker({ value, onChange, color }: { value: string; onChange: (v: string) => void; color: string }) {
+  const [open, setOpen] = useState(false);
+  const CurrentIcon = ICON_MAP[value] || HelpCircle;
+  const currentLabel = ICON_OPTIONS.find(i => i.name === value)?.label || value;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        className="form-control"
+        style={{
+          display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer',
+          backgroundColor: open ? 'var(--primary-bg)' : undefined,
+          borderColor: open ? 'var(--primary)' : undefined,
+        }}
+      >
+        <div style={{
+          width: '24px', height: '24px', borderRadius: '6px', flexShrink: 0,
+          backgroundColor: `${color}22`, color: color,
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <CurrentIcon size={14} />
+        </div>
+        <span style={{ flex: 1, fontSize: '13px', fontWeight: 600, textAlign: 'left' }}>{currentLabel}</span>
+        <ChevronDown size={14} style={{ color: 'var(--text-secondary)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s', flexShrink: 0 }} />
+      </button>
+
+      {open && (
+        <div style={{
+          marginTop: '6px',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(6, 1fr)',
+          gap: '4px',
+          padding: '8px',
+          border: '1px solid var(--border)',
+          borderRadius: '12px',
+          backgroundColor: 'var(--bg-card)',
+          maxHeight: '192px',
+          overflowY: 'auto'
+        }}>
+          {ICON_OPTIONS.map(opt => {
+            const Icon = ICON_MAP[opt.name] || HelpCircle;
+            const isSelected = value === opt.name;
+            return (
+              <button
+                key={opt.name}
+                type="button"
+                onClick={() => { onChange(opt.name); setOpen(false); }}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  gap: '3px', padding: '7px 2px', borderRadius: '8px',
+                  border: isSelected ? `1.5px solid ${color}` : '1.5px solid transparent',
+                  backgroundColor: isSelected ? `${color}22` : 'transparent',
+                  color: isSelected ? color : 'var(--text-secondary)',
+                  cursor: 'pointer', transition: 'all 0.15s'
+                }}
+              >
+                <Icon size={18} />
+                <span style={{
+                  fontSize: '9px', fontWeight: isSelected ? 700 : 500,
+                  textAlign: 'center', lineHeight: 1.2,
+                  maxWidth: '38px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                }}>{opt.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 
 export default function SettingsPage() {
@@ -1529,37 +1655,20 @@ export default function SettingsPage() {
                           onChange={(e) => setEditCatName(e.target.value)}
                         />
                       </div>
-                      <div style={{ display: 'flex', gap: '8px', marginBottom: '4px' }}>
-                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                          <label>Loại</label>
-                          <select
-                            className="form-control"
-                            value={editCatType}
-                            onChange={(e: any) => setEditCatType(e.target.value)}
-                          >
-                            <option value="expense">Khoản chi</option>
-                            <option value="income">Khoản thu</option>
-                          </select>
-                        </div>
-                        <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                          <label>Biểu tượng</label>
-                          <select
-                            className="form-control"
-                            value={editCatIcon}
-                            onChange={(e) => setEditCatIcon(e.target.value)}
-                          >
-                            <option value="Utensils">Dụng cụ ăn</option>
-                            <option value="Zap">Điện/Năng lượng</option>
-                            <option value="Car">Xe cộ</option>
-                            <option value="GraduationCap">Học tập</option>
-                            <option value="HeartPulse">Sức khỏe</option>
-                            <option value="ShoppingBag">Mua sắm</option>
-                            <option value="Wrench">Sửa chữa</option>
-                            <option value="PiggyBank">Tiết kiệm</option>
-                            <option value="TrendingUp">Biểu đồ tăng</option>
-                            <option value="HelpCircle">Khác</option>
-                          </select>
-                        </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>Loại</label>
+                        <select
+                          className="form-control"
+                          value={editCatType}
+                          onChange={(e: any) => setEditCatType(e.target.value)}
+                        >
+                          <option value="expense">Khoản chi</option>
+                          <option value="income">Khoản thu</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label>Biểu tượng</label>
+                        <IconPicker value={editCatIcon} onChange={setEditCatIcon} color={editCatColor} />
                       </div>
                       <div className="form-group" style={{ marginBottom: '8px' }}>
                         <label>Màu sắc</label>
@@ -1690,25 +1799,10 @@ export default function SettingsPage() {
                   <option value="income">Khoản thu</option>
                 </select>
               </div>
-              <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
-                <label>Biểu tượng</label>
-                <select
-                  className="form-control"
-                  value={newCatIcon}
-                  onChange={(e) => setNewCatIcon(e.target.value)}
-                >
-                  <option value="Utensils">Dụng cụ ăn</option>
-                  <option value="Zap">Điện/Năng lượng</option>
-                  <option value="Car">Xe cộ</option>
-                  <option value="GraduationCap">Học tập</option>
-                  <option value="HeartPulse">Sức khỏe</option>
-                  <option value="ShoppingBag">Mua sắm</option>
-                  <option value="Wrench">Sửa chữa</option>
-                  <option value="PiggyBank">Tiết kiệm</option>
-                  <option value="TrendingUp">Biểu đồ tăng</option>
-                  <option value="HelpCircle">Khác</option>
-                </select>
-              </div>
+            </div>
+            <div className="form-group">
+              <label>Biểu tượng</label>
+              <IconPicker value={newCatIcon} onChange={setNewCatIcon} color={newCatColor} />
             </div>
             <div className="form-group">
               <label>Màu sắc đại diện</label>

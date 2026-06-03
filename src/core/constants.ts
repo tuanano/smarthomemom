@@ -1,19 +1,34 @@
-import { 
-  ShoppingBag, 
-  Utensils, 
-  Zap, 
-  Car, 
-  GraduationCap, 
-  HeartPulse, 
-  Wrench, 
-  PiggyBank,
-  TrendingUp,
-  HelpCircle
+import {
+  ShoppingBag, Utensils, Zap, Car, GraduationCap, HeartPulse, Wrench, PiggyBank, TrendingUp, HelpCircle,
+  Coffee, UtensilsCrossed, Wine, Home, Lightbulb, Droplets, Wifi, Sofa, Flame,
+  Pill, Stethoscope, Dumbbell, Activity, BookOpen, Laptop, Briefcase,
+  ShoppingCart, Shirt, Scissors, Sparkles, Tv, Music, Gamepad2, Camera, Film,
+  Baby, Gift, Heart, PartyPopper, DollarSign, Wallet, BarChart3,
+  Phone, Globe, Leaf, Bus, Plane, Bike, Fuel, Package
 } from 'lucide-react';
 import type { CustomCategory, CustomIngredient } from '../types';
 
 export const ICON_MAP: { [key: string]: any } = {
-  Utensils, Zap, Car, GraduationCap, HeartPulse, ShoppingBag, Wrench, PiggyBank, TrendingUp, HelpCircle
+  // Ăn uống
+  Utensils, UtensilsCrossed, Coffee, Wine,
+  // Di chuyển
+  Car, Bike, Bus, Plane, Fuel,
+  // Nhà ở & Tiện ích
+  Home, Lightbulb, Droplets, Wifi, Zap, Flame, Sofa, Wrench,
+  // Sức khỏe
+  HeartPulse, Pill, Stethoscope, Dumbbell, Activity,
+  // Giáo dục & Công việc
+  GraduationCap, BookOpen, Laptop, Briefcase,
+  // Mua sắm & Cá nhân
+  ShoppingBag, ShoppingCart, Shirt, Scissors, Sparkles,
+  // Giải trí
+  Tv, Music, Gamepad2, Camera, Film,
+  // Gia đình & Trẻ em
+  Baby, Gift, Heart, PartyPopper,
+  // Tài chính
+  PiggyBank, TrendingUp, DollarSign, Wallet, BarChart3,
+  // Khác
+  Phone, Globe, Leaf, Package, HelpCircle
 };
 
 export const DEFAULT_CATEGORIES: CustomCategory[] = [
