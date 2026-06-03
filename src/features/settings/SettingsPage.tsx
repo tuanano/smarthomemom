@@ -139,7 +139,7 @@ function IconPicker({ value, onChange, color }: { value: string; onChange: (v: s
 
 
 export default function SettingsPage() {
-  const { user, setUser } = useAuthStore();
+  const { user } = useAuthStore();
   const confirm = useConfirm();
   const showToast = useToast();
   const {
@@ -2250,7 +2250,7 @@ export default function SettingsPage() {
               {[
                 { label: 'Tên nhóm', value: family.familyName },
                 { label: 'Thành viên', value: `${family.members.length} người` },
-              ].map((row, idx) => (
+              ].map((row) => (
                 <div key={row.label} style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   padding: '10px 0',
@@ -2289,6 +2289,63 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+
+          {/* Bảo mật & Tài khoản */}
+          {(() => {
+            const isPasswordProvider = user.providerData.some(p => p.providerId === 'password');
+            return (
+              <div className="card">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                  <Shield size={18} style={{ color: '#4EA8DE' }} />
+                  <span style={{ fontWeight: 700, fontSize: '15px' }}>Bảo mật & Tài khoản</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Email</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontWeight: 700, fontSize: '12px', color: 'var(--text-primary)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</span>
+                      <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 6px', borderRadius: '6px', backgroundColor: user.emailVerified ? '#E8F5E9' : '#FFF8E1', color: user.emailVerified ? '#2E7D32' : '#F57F17' }}>
+                        {user.emailVerified ? '✓' : '⚠'}
+                      </span>
+                    </div>
+                  </div>
+                  {!user.emailVerified && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Xác thực email</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>Email chưa được xác thực</div>
+                      </div>
+                      <button type="button" onClick={handleSendVerification} style={{ fontSize: '12px', fontWeight: 700, padding: '6px 12px', borderRadius: '8px', border: '1px solid #4EA8DE', backgroundColor: '#E3F2FD', color: '#1565C0', cursor: 'pointer' }}>
+                        Gửi email
+                      </button>
+                    </div>
+                  )}
+                  {isPasswordProvider && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                      onClick={() => { setPasswordError(''); setCurrentPassword(''); setNewPassword(''); setConfirmPassword(''); setView('changePassword'); }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <Lock size={15} style={{ color: '#8338EC' }} />
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Đổi mật khẩu</span>
+                      </div>
+                      <ChevronRight size={15} style={{ color: 'var(--text-secondary)' }} />
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Ngày tham gia</span>
+                    <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)' }}>
+                      {user.metadata.creationTime ? new Date(user.metadata.creationTime).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
+                    <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>Đăng nhập gần nhất</span>
+                    <span style={{ fontWeight: 700, fontSize: '13px', color: 'var(--text-primary)' }}>
+                      {user.metadata.lastSignInTime ? new Date(user.metadata.lastSignInTime).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Hỗ trợ */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>

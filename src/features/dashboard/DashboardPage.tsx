@@ -21,6 +21,7 @@ export default function DashboardPage() {
     transactions,
     budgets,
     deleteTransaction,
+    saveBudget,
     customCategories
   } = useFamilyStore();
 
