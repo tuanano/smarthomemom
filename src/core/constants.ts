@@ -101,5 +101,11 @@ export const getMergedCategories = (customCats: any[]) => {
 };
 
 export const getMergedIngredients = (customIngs: any[]) => {
-  return customIngs || [];
+  const base = [...DEFAULT_INGREDIENTS];
+  (customIngs || []).forEach((custom: CustomIngredient) => {
+    if (!base.find(i => i.id === custom.id)) {
+      base.push(custom);
+    }
+  });
+  return base;
 };

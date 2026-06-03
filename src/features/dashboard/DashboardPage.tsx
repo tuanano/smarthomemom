@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import CurrencyInput from '../../components/CurrencyInput';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
 import type { Budget, Transaction } from '../../types';
 import { getMergedCategories } from '../../core/constants';
-import { Plus, Wallet as WalletIcon, TrendingDown, TrendingUp, AlertTriangle, Trash2, PiggyBank, Coins, CreditCard, ArrowRightLeft, ChevronRight, ArrowLeft, Search, MoreVertical, HelpCircle } from 'lucide-react';
+import { Wallet as WalletIcon, TrendingDown, TrendingUp, AlertTriangle, Trash2, PiggyBank, Coins, CreditCard, ArrowRightLeft, ChevronRight, ArrowLeft, Search, MoreVertical, HelpCircle, Eye, EyeOff } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { format } from 'date-fns';
 import TransactionModal from '../budget/TransactionModal';
@@ -15,13 +15,12 @@ import PullToRefresh from '../../components/PullToRefresh';
 export default function DashboardPage() {
   const { user } = useAuthStore();
   const confirm = useConfirm();
-  const { 
-    family, 
+  const {
+    family,
     wallets,
     transactions,
     budgets,
     deleteTransaction,
-    saveBudget,
     customCategories
   } = useFamilyStore();
 
@@ -42,28 +41,12 @@ export default function DashboardPage() {
   const [selectedBudgetForDetail, setSelectedBudgetForDetail] = useState<typeof budgets[0] | null>(null);
   const [walletPeriod, setWalletPeriod] = useState<30 | 90 | 365>(30);
 
+  const [showBalance, setShowBalance] = useState(() => {
+    return localStorage.getItem('showBalance') !== 'false';
+  });
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
 
-  // Initial dummy budgets if empty
-  useEffect(() => {
-    if (user && budgets.length === 0) {
-      const initBudgets = async () => {
-        await saveBudget(user.uid, {
-          budgetId: 'budget_food',
-          category: 'Đi chợ / Ăn uống',
-          limitAmount: 6000000,
-          spentAmount: 0,
-          period: 'monthly',
-          startDate: new Date(),
-          endDate: new Date(),
-          alertThreshold: 0.8,
-          isAlerted: false
-        });
-      };
-      initBudgets();
-    }
-  }, [user, budgets]);
 
   // Calculate totals — chỉ tính ví chi tiêu (includeInBalance !== false)
   const totalBalance = wallets
@@ -444,24 +427,9 @@ export default function DashboardPage() {
         {view === 'main' ? (
           <>
             {/* Upper header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <div>
-                <h2 style={{ fontSize: '20px' }}>Chào {greetingName}, {family?.familyName}!</h2>
-                <p style={{ fontSize: '12px' }}>Hôm nay là {new Date().toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-              </div>
-              <button
-                onClick={() => setModalOpen(true)}
-                className="btn btn-primary"
-                style={{
-                  width: '44px',
-                  height: '44px',
-                  padding: 0,
-                  borderRadius: '50%',
-                  boxShadow: 'var(--shadow-md)'
-                }}
-              >
-                <Plus size={24} />
-              </button>
+            <div style={{ marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '20px' }}>Chào {greetingName}, {family?.familyName}!</h2>
+              <p style={{ fontSize: '12px' }}>Hôm nay là {new Date().toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
             </div>
 
             {/* Balance Widget Card */}
@@ -476,24 +444,41 @@ export default function DashboardPage() {
                 <WalletIcon size={120} />
               </div>
               
-              <div style={{ fontSize: '13px', fontWeight: 600, opacity: 0.9 }}>Tổng số dư khả dụng</div>
-              <div style={{ fontSize: '28px', fontWeight: 800, margin: '8px 0 16px' }}>{totalBalance.toLocaleString('vi-VN')} đ</div>
-              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, opacity: 0.9 }}>Tổng số dư khả dụng</div>
+                <button
+                  onClick={() => setShowBalance(v => {
+                    localStorage.setItem('showBalance', String(!v));
+                    return !v;
+                  })}
+                  style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.8)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                >
+                  {showBalance ? <Eye size={16} /> : <EyeOff size={16} />}
+                </button>
+              </div>
+              <div style={{ fontSize: '28px', fontWeight: 800, margin: '8px 0 16px', letterSpacing: showBalance ? 'normal' : '4px' }}>
+                {showBalance ? `${totalBalance.toLocaleString('vi-VN')} đ` : '••••••'}
+              </div>
+
               <div style={{ display: 'flex', gap: '20px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '12px' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: '11px', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '4px' }}><TrendingUp size={12} /> Tổng thu</div>
-                  <div style={{ fontSize: '15px', fontWeight: 700 }}>+{totalIncome.toLocaleString('vi-VN')}đ</div>
+                  <div style={{ fontSize: '15px', fontWeight: 700 }}>
+                    {showBalance ? `+${totalIncome.toLocaleString('vi-VN')}đ` : '••••'}
+                  </div>
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: '11px', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '4px' }}><TrendingDown size={12} /> Tổng chi</div>
-                  <div style={{ fontSize: '15px', fontWeight: 700 }}>-{totalExpense.toLocaleString('vi-VN')}đ</div>
+                  <div style={{ fontSize: '15px', fontWeight: 700 }}>
+                    {showBalance ? `-${totalExpense.toLocaleString('vi-VN')}đ` : '••••'}
+                  </div>
                 </div>
               </div>
             </div>
 
             {/* Wallets detail */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-              {wallets.map(w => {
+              {wallets.filter(w => w.includeInBalance !== false).map(w => {
                 const WalIcon = w.type === 'cash' ? Coins : w.type === 'bank' ? CreditCard : PiggyBank;
                 const isSaving = w.includeInBalance === false;
                 return (
@@ -543,8 +528,8 @@ export default function DashboardPage() {
 
                     {/* Balance */}
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-primary)' }}>
-                        {w.balance.toLocaleString('vi-VN')}đ
+                      <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-primary)', letterSpacing: showBalance ? 'normal' : '3px' }}>
+                        {showBalance ? `${w.balance.toLocaleString('vi-VN')}đ` : '••••'}
                       </div>
                       <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
                         {isSaving ? 'Tiết kiệm' : 'Số dư'}
@@ -959,30 +944,6 @@ export default function DashboardPage() {
           )
         )}
       </PullToRefresh>
-
-      {/* Floating Plus action button specifically for wallet_detail */}
-      {view === 'wallet_detail' && (
-        <button
-          onClick={() => setModalOpen(true)}
-          className="btn btn-primary"
-          style={{
-            position: 'absolute',
-            bottom: '80px',
-            right: '20px',
-            width: '48px',
-            height: '48px',
-            borderRadius: '50%',
-            padding: 0,
-            boxShadow: 'var(--shadow-lg)',
-            zIndex: 10,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          <Plus size={24} />
-        </button>
-      )}
 
       {/* Custom Transaction Modal Component */}
       <TransactionModal 
