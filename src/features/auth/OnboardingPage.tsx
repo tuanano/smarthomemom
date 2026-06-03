@@ -6,6 +6,8 @@ import { useFamilyStore } from '../../stores/familyStore';
 import type { Family, FamilyMember } from '../../types';
 import { Plus, Trash2, Users, Flame, ArrowRight, ArrowLeft, Coins, CreditCard, PiggyBank, Pencil, Check, UserCheck } from 'lucide-react';
 import { DEFAULT_CATEGORIES, DEFAULT_INGREDIENTS } from '../../core/constants';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebase';
 
 export default function OnboardingPage() {
   const { user } = useAuthStore();
@@ -230,6 +232,14 @@ export default function OnboardingPage() {
   const handleSubmit = async () => {
     if (!user) return;
     setLoading(true);
+
+    // Guard: if family already exists (e.g. cache miss routed here on new device), abort
+    const existingSnap = await getDoc(doc(db, 'families', user.uid));
+    if (existingSnap.exists()) {
+      // subscribeFamily will pick up the data via its onSnapshot listener
+      setLoading(false);
+      return;
+    }
 
     // Calculate macros
     const protein = Math.round((totalCalories * 0.20) / 4);

@@ -101,11 +101,12 @@ export const getMergedCategories = (customCats: any[]) => {
 };
 
 export const getMergedIngredients = (customIngs: any[]) => {
-  const base = [...DEFAULT_INGREDIENTS];
-  (customIngs || []).forEach((custom: CustomIngredient) => {
-    if (!base.find(i => i.id === custom.id)) {
-      base.push(custom);
+  const customMap = new Map((customIngs || []).map((i: CustomIngredient) => [i.id, i]));
+  const result = DEFAULT_INGREDIENTS.map(def => customMap.get(def.id) ?? def);
+  customMap.forEach((custom) => {
+    if (!DEFAULT_INGREDIENTS.some(d => d.id === custom.id)) {
+      result.push(custom);
     }
   });
-  return base;
+  return result;
 };

@@ -88,8 +88,23 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   
   subscribeFamily: (familyId) => {
     set({ familyLoading: true });
-    return onSnapshot(doc(db, 'families', familyId), (docSnap) => {
-      if (docSnap.exists()) {
+    return onSnapshot(
+      doc(db, 'families', familyId),
+      { includeMetadataChanges: true },
+      (docSnap) => {
+        if (!docSnap.exists()) {
+          // On a new device, persistentLocalCache fires from cold cache with exists=false
+          // before the server responds. Wait for server confirmation before showing onboarding.
+          if (docSnap.metadata.fromCache) return;
+          set({
+            family: null,
+            customCategories: [],
+            customIngredients: [],
+            favoriteMenus: [],
+            familyLoading: false,
+          });
+          return;
+        }
         const familyData = docSnap.data() as Family;
         const categories = familyData.customCategories && familyData.customCategories.length > 0
           ? familyData.customCategories
@@ -108,16 +123,8 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
           favoriteMenus: familyData.favoriteMenus || [],
           familyLoading: false,
         });
-      } else {
-        set({
-          family: null,
-          customCategories: [],
-          customIngredients: [],
-          favoriteMenus: [],
-          familyLoading: false,
-        });
       }
-    });
+    );
   },
   
   subscribeWallets: (familyId) => {
@@ -328,7 +335,13 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   },
   
   deleteWallet: async (familyId, walletId) => {
+    const family = get().family;
+    const remainingWallets = get().wallets.filter(w => w.walletId !== walletId);
     await deleteDoc(doc(db, 'families', familyId, 'wallets', walletId));
+    if (family?.defaultWalletId === walletId) {
+      const newDefaultId = remainingWallets[0]?.walletId ?? null;
+      await setDoc(doc(db, 'families', familyId), { ...family, defaultWalletId: newDefaultId });
+    }
   },
 
   deleteBudget: async (familyId, budgetId) => {
@@ -359,9 +372,16 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     const family = get().family;
     if (!family) return;
     const current = family.customCategories || [];
+    const deletedCat = current.find(c => c.id === catId);
     const updated = current.filter(c => c.id !== catId);
     const updatedFamily = { ...family, customCategories: updated };
     await setDoc(doc(db, 'families', familyId), updatedFamily);
+    if (deletedCat) {
+      const affectedBudgets = get().budgets.filter(b => b.category === deletedCat.name);
+      await Promise.all(
+        affectedBudgets.map(b => deleteDoc(doc(db, 'families', familyId, 'budgets', b.budgetId)))
+      );
+    }
   },
 
   addCustomIngredient: async (familyId, ingredient) => {
@@ -383,6 +403,15 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     const updated = current.filter(i => i.id !== ingId);
     const updatedFamily = { ...family, customIngredients: updated };
     await setDoc(doc(db, 'families', familyId), updatedFamily);
+    const currentAvailable = get().availableIngredients;
+    if (currentAvailable.includes(ingId)) {
+      const newAvailable = currentAvailable.filter(id => id !== ingId);
+      await setDoc(doc(db, 'families', familyId, 'settings', 'ingredients'), {
+        availableIngredients: newAvailable,
+        updatedAt: new Date()
+      });
+      set({ availableIngredients: newAvailable });
+    }
   },
 
   saveFavoriteMenu: async (familyId, favMenu) => {
