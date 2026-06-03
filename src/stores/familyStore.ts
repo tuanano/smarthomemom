@@ -1,11 +1,12 @@
 import { create } from 'zustand';
 import { db } from '../firebase';
-import { 
-  doc, 
-  collection, 
-  onSnapshot, 
-  runTransaction, 
+import {
+  doc,
+  collection,
+  onSnapshot,
+  runTransaction,
   setDoc,
+  updateDoc,
   query,
   orderBy,
   deleteDoc
@@ -45,6 +46,7 @@ interface FamilyState {
   updateTransaction: (familyId: string, oldTx: Transaction, newTx: Transaction) => Promise<void>;
   saveBudget: (familyId: string, budget: Budget) => Promise<void>;
   deleteWallet: (familyId: string, walletId: string) => Promise<void>;
+  updateWallet: (familyId: string, walletId: string, updates: Partial<Pick<Wallet, 'name' | 'colorCode' | 'iconName'>>) => Promise<void>;
   deleteBudget: (familyId: string, budgetId: string) => Promise<void>;
   saveIngredients: (familyId: string, ingredients: string[]) => Promise<void>;
   
@@ -174,6 +176,14 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
       ...wallet,
       createdAt: new Date()
     });
+  },
+
+  updateWallet: async (familyId, walletId, updates) => {
+    const walletDocRef = doc(db, 'families', familyId, 'wallets', walletId);
+    await updateDoc(walletDocRef, updates);
+    set(state => ({
+      wallets: state.wallets.map(w => w.walletId === walletId ? { ...w, ...updates } : w)
+    }));
   },
   
   createTransaction: async (familyId, transaction) => {

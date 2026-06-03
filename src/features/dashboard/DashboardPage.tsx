@@ -5,7 +5,7 @@ import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
 import type { Budget, Transaction } from '../../types';
 import { getMergedCategories } from '../../core/constants';
-import { Wallet as WalletIcon, TrendingDown, TrendingUp, AlertTriangle, Trash2, PiggyBank, Coins, CreditCard, ArrowRightLeft, ChevronRight, ArrowLeft, Search, MoreVertical, HelpCircle, Eye, EyeOff } from 'lucide-react';
+import { Wallet as WalletIcon, TrendingDown, TrendingUp, AlertTriangle, Trash2, PiggyBank, Coins, CreditCard, ArrowRightLeft, ChevronRight, ArrowLeft, HelpCircle, Eye, EyeOff, Plus, Minus, Pencil, X, Check } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { format } from 'date-fns';
 import TransactionModal from '../budget/TransactionModal';
@@ -22,7 +22,9 @@ export default function DashboardPage() {
     budgets,
     deleteTransaction,
     saveBudget,
-    customCategories
+    customCategories,
+    deleteWallet,
+    updateWallet
   } = useFamilyStore();
 
   const mergedCategories = getMergedCategories(customCategories);
@@ -40,13 +42,22 @@ export default function DashboardPage() {
   const [view, setView] = useState<'main' | 'history' | 'wallet_detail' | 'budget_detail'>('main');
   const [selectedWalletIdForDetail, setSelectedWalletIdForDetail] = useState<string | null>(null);
   const [selectedBudgetForDetail, setSelectedBudgetForDetail] = useState<typeof budgets[0] | null>(null);
-  const [walletPeriod, setWalletPeriod] = useState<30 | 90 | 365>(30);
+  const [walletPeriod, setWalletPeriod] = useState<'month' | 30 | 90 | 365 | 'custom'>('month');
+  const [walletDateFrom, setWalletDateFrom] = useState('');
+  const [walletDateTo, setWalletDateTo] = useState('');
+  const [walletTxTypeFilter, setWalletTxTypeFilter] = useState<'all' | 'income' | 'expense' | 'transfer'>('all');
+  const [editingWallet, setEditingWallet] = useState(false);
+  const [editWalletName, setEditWalletName] = useState('');
+  const [editWalletColor, setEditWalletColor] = useState('');
+  const [modalDefaultType, setModalDefaultType] = useState<'income' | 'expense' | 'transfer' | undefined>(undefined);
 
   const [showBalance, setShowBalance] = useState(() => {
     return localStorage.getItem('showBalance') !== 'false';
   });
   const [searchTerm, setSearchTerm] = useState('');
-  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month'>('all');
+  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
 
   // Calculate totals — chỉ tính ví chi tiêu (includeInBalance !== false)
@@ -63,22 +74,33 @@ export default function DashboardPage() {
     .reduce((sum, t) => sum + t.amount, 0);
 
   // Dynamic budget calculation based on current transactions of the month
-  const getCategorySpent = (categoryName: string) => {
+  const getCategorySpent = (categoryName: string, startDate?: Date, endDate?: Date) => {
     return transactions
-      .filter(t => t.type === 'expense' && t.category === categoryName)
+      .filter(t => {
+        if (t.type !== 'expense' || t.category !== categoryName) return false;
+        if (startDate || endDate) {
+          const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+          if (startDate && d < startDate) return false;
+          if (endDate && d > endDate) return false;
+        }
+        return true;
+      })
       .reduce((sum, t) => sum + t.amount, 0);
   };
 
   const handleAddBudget = async () => {
     if (!user) return;
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     const newB: Budget = {
       budgetId: 'budget_' + Date.now().toString(),
       category: newBudgetCategory,
       limitAmount: newBudgetLimit,
       spentAmount: 0,
       period: 'monthly',
-      startDate: new Date(),
-      endDate: new Date(),
+      startDate: monthStart,
+      endDate: monthEnd,
       alertThreshold: 0.8,
       isAlerted: false
     };
@@ -132,7 +154,21 @@ export default function DashboardPage() {
         txDate.getFullYear() === now.getFullYear()
       );
     }
-    
+
+    if (dateFilter === 'custom') {
+      if (dateFrom) {
+        const from = new Date(dateFrom);
+        from.setHours(0, 0, 0, 0);
+        if (txDate < from) return false;
+      }
+      if (dateTo) {
+        const to = new Date(dateTo);
+        to.setHours(23, 59, 59, 999);
+        if (txDate > to) return false;
+      }
+      return true;
+    }
+
     return true;
   });
 
@@ -170,16 +206,32 @@ export default function DashboardPage() {
   const walletTransactions = useMemo(() => {
     if (!selectedWalletIdForDetail) return [];
     const now = new Date();
-    const startDate = new Date();
-    startDate.setDate(now.getDate() - walletPeriod);
-    
     return transactions.filter(t => {
       const txDate = t.date?.toDate ? t.date.toDate() : new Date(t.date);
-      const isWithinPeriod = txDate >= startDate;
+      let isWithinPeriod: boolean;
+      if (walletPeriod === 'month') {
+        isWithinPeriod = txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
+      } else if (walletPeriod === 'custom') {
+        isWithinPeriod = true;
+        if (walletDateFrom) {
+          const from = new Date(walletDateFrom);
+          from.setHours(0, 0, 0, 0);
+          if (txDate < from) isWithinPeriod = false;
+        }
+        if (isWithinPeriod && walletDateTo) {
+          const to = new Date(walletDateTo);
+          to.setHours(23, 59, 59, 999);
+          if (txDate > to) isWithinPeriod = false;
+        }
+      } else {
+        const startDate = new Date();
+        startDate.setDate(now.getDate() - walletPeriod);
+        isWithinPeriod = txDate >= startDate;
+      }
       const isRelated = t.walletId === selectedWalletIdForDetail || t.toWalletId === selectedWalletIdForDetail;
       return isRelated && isWithinPeriod;
     });
-  }, [transactions, selectedWalletIdForDetail, walletPeriod]);
+  }, [transactions, selectedWalletIdForDetail, walletPeriod, walletDateFrom, walletDateTo]);
 
   const walletIncome = useMemo(() => {
     return walletTransactions
@@ -221,9 +273,14 @@ export default function DashboardPage() {
     return balances;
   }, [transactions, selectedWalletIdForDetail, selectedWallet]);
 
+  const filteredWalletTransactions = useMemo(() => {
+    if (walletTxTypeFilter === 'all') return walletTransactions;
+    return walletTransactions.filter(t => t.type === walletTxTypeFilter);
+  }, [walletTransactions, walletTxTypeFilter]);
+
   // Group transactions by date for selected wallet
   const groupedWalletTransactions = useMemo(() => {
-    const sorted = [...walletTransactions].sort((a, b) => {
+    const sorted = [...filteredWalletTransactions].sort((a, b) => {
       const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
       const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
       return dateB.getTime() - dateA.getTime();
@@ -237,7 +294,7 @@ export default function DashboardPage() {
       groups[dateStr].push(t);
     });
     return groups;
-  }, [walletTransactions]);
+  }, [filteredWalletTransactions]);
 
   const getDailyNetChange = (groupTxs: Transaction[]) => {
     let change = 0;
@@ -585,7 +642,16 @@ export default function DashboardPage() {
               )}
 
               {budgets.map(b => {
-                const spent = getCategorySpent(b.category);
+                let bStart: Date, bEnd: Date;
+                if (b.period === 'monthly') {
+                  const now = new Date();
+                  bStart = new Date(now.getFullYear(), now.getMonth(), 1);
+                  bEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+                } else {
+                  bStart = b.startDate?.toDate ? b.startDate.toDate() : new Date(b.startDate);
+                  bEnd = b.endDate?.toDate ? b.endDate.toDate() : new Date(b.endDate);
+                }
+                const spent = getCategorySpent(b.category, bStart, bEnd);
                 const ratio = b.limitAmount > 0 ? spent / b.limitAmount : 0;
                 const pct = Math.min(ratio * 100, 100);
                 let statusColor = 'var(--secondary)';
@@ -766,7 +832,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Search & Filter Controls */}
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
               <input
                 type="text"
                 className="form-control"
@@ -785,8 +851,30 @@ export default function DashboardPage() {
                 <option value="today">Hôm nay</option>
                 <option value="week">Tuần này</option>
                 <option value="month">Tháng này</option>
+                <option value="custom">Tùy chỉnh</option>
               </select>
             </div>
+
+            {dateFilter === 'custom' && (
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  style={{ flex: 1, height: '40px', fontSize: '13px' }}
+                />
+                <span style={{ color: 'var(--text-secondary)', fontSize: '13px', flexShrink: 0 }}>→</span>
+                <input
+                  type="date"
+                  className="form-control"
+                  value={dateTo}
+                  min={dateFrom}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  style={{ flex: 1, height: '40px', fontSize: '13px' }}
+                />
+              </div>
+            )}
 
             {/* Transactions list */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', paddingBottom: '20px' }}>
@@ -798,142 +886,249 @@ export default function DashboardPage() {
             </div>
           </>
         ) : view === 'wallet_detail' ? (
-          /* Wallet Details view */
-          selectedWallet && (
-            <div style={{ paddingBottom: '20px' }}>
-              {/* Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setView('main')}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-primary)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      padding: '6px',
-                      borderRadius: '50%',
-                      backgroundColor: 'var(--bg-grey)',
-                      width: '36px',
-                      height: '36px'
-                    }}
-                  >
-                    <ArrowLeft size={18} />
-                  </button>
-                  <h2 style={{ fontSize: '18px', fontWeight: 800 }}>{selectedWallet.name}</h2>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <button type="button" style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', padding: 0 }}><Search size={20} /></button>
-                  <button type="button" style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', padding: 0 }}><MoreVertical size={20} /></button>
-                </div>
-              </div>
+          selectedWallet && (() => {
+            const WalIcon = selectedWallet.type === 'cash' ? Coins : selectedWallet.type === 'bank' ? CreditCard : PiggyBank;
+            const walletTypeName = selectedWallet.type === 'cash' ? 'Tiền mặt' : selectedWallet.type === 'bank' ? 'Thẻ / Ngân hàng' : 'Ví điện tử';
+            const WALLET_COLORS = ['#E63946', '#F4A261', '#2A9D8F', '#457B9D', '#7B2D8B', '#264653', '#E9C46A', '#6D6875'];
+            const typeFilters: { key: 'all' | 'income' | 'expense' | 'transfer'; label: string }[] = [
+              { key: 'all', label: 'Tất cả' },
+              { key: 'income', label: 'Thu' },
+              { key: 'expense', label: 'Chi' },
+              { key: 'transfer', label: 'Chuyển' },
+            ];
 
-              {/* Time period filter selector */}
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '16px' }}>
-                <select
-                  value={walletPeriod}
-                  onChange={(e) => setWalletPeriod(parseInt(e.target.value) as any)}
-                  style={{
-                    border: 'none',
-                    background: 'none',
-                    color: '#4EA8DE',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    outline: 'none',
-                    padding: '4px 8px'
-                  }}
-                >
-                  <option value={30}>30 ngày gần nhất &gt;</option>
-                  <option value={90}>90 ngày gần nhất &gt;</option>
-                  <option value={365}>1 năm gần nhất &gt;</option>
-                </select>
-              </div>
-
-              {/* Summary Metrics Card */}
-              <div className="card" style={{ display: 'flex', padding: '16px 0', marginBottom: '16px' }}>
-                <div style={{ flex: 1, textAlign: 'center', borderRight: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Tổng thu</div>
-                  <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--secondary)' }}>
-                    {walletIncome.toLocaleString('vi-VN')} đ
+            return (
+              <div style={{ paddingBottom: '24px' }}>
+                {/* Top bar */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={() => { setView('main'); setEditingWallet(false); }}
+                      style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', borderRadius: '50%', backgroundColor: 'var(--bg-grey)', width: '36px', height: '36px', flexShrink: 0 }}
+                    >
+                      <ArrowLeft size={18} />
+                    </button>
+                    <h2 style={{ fontSize: '18px', fontWeight: 800 }}>Chi tiết ví</h2>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editingWallet) {
+                          setEditingWallet(false);
+                        } else {
+                          setEditWalletName(selectedWallet.name);
+                          setEditWalletColor(selectedWallet.colorCode);
+                          setEditingWallet(true);
+                        }
+                      }}
+                      style={{ background: 'none', border: 'none', color: editingWallet ? 'var(--primary)' : 'var(--text-secondary)', cursor: 'pointer', padding: '6px', borderRadius: '50%', backgroundColor: 'var(--bg-grey)', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      {editingWallet ? <X size={18} /> : <Pencil size={16} />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!user) return;
+                        const yes = await confirm({ title: 'Xoá ví', message: `Bạn có chắc muốn xoá ví "${selectedWallet.name}"? Dữ liệu giao dịch liên quan sẽ không bị xoá.`, confirmText: 'Xoá ví', variant: 'danger' });
+                        if (yes) { await deleteWallet(user.uid, selectedWallet.walletId); setView('main'); }
+                      }}
+                      style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: '6px', borderRadius: '50%', backgroundColor: 'var(--bg-grey)', width: '36px', height: '36px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 </div>
-                <div style={{ flex: 1, textAlign: 'center' }}>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '4px' }}>Tổng chi</div>
-                  <div style={{ fontSize: '16px', fontWeight: 700, color: 'var(--danger)' }}>
-                    {walletExpense.toLocaleString('vi-VN')} đ
-                  </div>
-                </div>
-              </div>
 
-              {/* Current balance row */}
-              <div className="card" style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '14px 16px',
-                marginBottom: '20px'
-              }}>
-                <span style={{ fontSize: '14px', color: 'var(--text-secondary)', fontWeight: 600 }}>Số dư hiện tại</span>
-                <strong style={{
-                  fontSize: '17px',
-                  fontWeight: 800,
-                  color: 'var(--text-primary)',
-                  borderBottom: '3px double var(--text-primary)',
-                  paddingBottom: '2px'
-                }}>
-                  {selectedWallet.balance.toLocaleString('vi-VN')} đ
-                </strong>
-              </div>
-
-              {/* Transactions list grouped by date */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                {Object.keys(groupedWalletTransactions).length === 0 ? (
-                  <p style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)', fontSize: '14px' }}>
-                    Không có giao dịch nào trong khoảng thời gian này.
-                  </p>
-                ) : (
-                  Object.keys(groupedWalletTransactions).map(dateStr => {
-                    const dayTxs = groupedWalletTransactions[dateStr];
-                    const netChange = getDailyNetChange(dayTxs);
-
-                    return (
-                      <div key={dateStr} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {/* Group Header */}
-                        <div style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '4px 8px',
-                          borderBottom: '1px solid var(--border)',
-                          fontSize: '13px',
-                          color: 'var(--text-secondary)',
-                          fontWeight: 700
-                        }}>
-                          <span>{getFormattedDateHeader(dateStr)}</span>
-                          <span style={{
-                            color: netChange > 0 ? 'var(--secondary)' : netChange < 0 ? 'var(--danger)' : 'var(--text-secondary)',
-                            fontWeight: 700
-                          }}>
-                            {netChange > 0 ? '+' : ''}{netChange.toLocaleString('vi-VN')} đ
-                          </span>
-                        </div>
-
-                        {/* Group Items */}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {dayTxs.map(t => renderTransactionRow(t, true))}
-                        </div>
+                {/* Edit form */}
+                {editingWallet && (
+                  <div className="card" style={{ marginBottom: '14px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '13px' }}>Tên ví</label>
+                      <input
+                        className="form-control"
+                        value={editWalletName}
+                        onChange={e => setEditWalletName(e.target.value)}
+                        style={{ height: '40px', fontSize: '14px' }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>Màu ví</label>
+                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                        {WALLET_COLORS.map(c => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setEditWalletColor(c)}
+                            style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: c, border: editWalletColor === c ? '3px solid var(--text-primary)' : '3px solid transparent', cursor: 'pointer', boxSizing: 'border-box' }}
+                          />
+                        ))}
                       </div>
-                    );
-                  })
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary"
+                      style={{ height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      onClick={async () => {
+                        if (!user || !editWalletName.trim()) return;
+                        await updateWallet(user.uid, selectedWallet.walletId, { name: editWalletName.trim(), colorCode: editWalletColor });
+                        setEditingWallet(false);
+                      }}
+                    >
+                      <Check size={16} /> Lưu thay đổi
+                    </button>
+                  </div>
                 )}
+
+                {/* Hero balance card */}
+                <div style={{
+                  borderRadius: '16px',
+                  background: `linear-gradient(135deg, ${selectedWallet.colorCode} 0%, ${selectedWallet.colorCode}bb 100%)`,
+                  color: 'white',
+                  padding: '20px',
+                  marginBottom: '14px',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{ opacity: 0.12, position: 'absolute', right: '-12px', bottom: '-12px' }}>
+                    <WalIcon size={100} />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                    <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <WalIcon size={18} />
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '16px' }}>{selectedWallet.name}</div>
+                      <div style={{ fontSize: '11px', opacity: 0.85 }}>{walletTypeName}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '4px' }}>Số dư hiện tại</div>
+                  <div style={{ fontSize: '26px', fontWeight: 800, letterSpacing: showBalance ? 'normal' : '4px' }}>
+                    {showBalance ? `${selectedWallet.balance.toLocaleString('vi-VN')} đ` : '••••••'}
+                  </div>
+                  <div style={{ display: 'flex', gap: '20px', marginTop: '14px', borderTop: '1px solid rgba(255,255,255,0.25)', paddingTop: '12px' }}>
+                    <div>
+                      <div style={{ fontSize: '10px', opacity: 0.8, marginBottom: '2px' }}>Thu kỳ này</div>
+                      <div style={{ fontSize: '13px', fontWeight: 700 }}>+{walletIncome.toLocaleString('vi-VN')}đ</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '10px', opacity: 0.8, marginBottom: '2px' }}>Chi kỳ này</div>
+                      <div style={{ fontSize: '13px', fontWeight: 700 }}>-{walletExpense.toLocaleString('vi-VN')}đ</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '10px', opacity: 0.8, marginBottom: '2px' }}>Chênh lệch</div>
+                      <div style={{ fontSize: '13px', fontWeight: 700 }}>{(walletIncome - walletExpense) >= 0 ? '+' : ''}{(walletIncome - walletExpense).toLocaleString('vi-VN')}đ</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick actions */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '14px' }}>
+                  {[
+                    { label: 'Thu tiền', icon: <Plus size={16} />, type: 'income' as const, color: 'var(--secondary)', bg: 'var(--secondary-bg)' },
+                    { label: 'Chi tiêu', icon: <Minus size={16} />, type: 'expense' as const, color: 'var(--danger)', bg: '#E6394610' },
+                    { label: 'Chuyển khoản', icon: <ArrowRightLeft size={14} />, type: 'transfer' as const, color: 'var(--primary)', bg: 'var(--primary-bg)' },
+                  ].map(action => (
+                    <button
+                      key={action.type}
+                      type="button"
+                      onClick={() => { setModalDefaultType(action.type); setSelectedTransaction(null); setModalOpen(true); }}
+                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', padding: '12px 8px', borderRadius: '12px', border: `1px solid ${action.color}30`, backgroundColor: action.bg, cursor: 'pointer' }}
+                    >
+                      <div style={{ width: '34px', height: '34px', borderRadius: '50%', backgroundColor: `${action.color}20`, color: action.color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        {action.icon}
+                      </div>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: action.color }}>{action.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Period filter dropdown */}
+                <div style={{ marginBottom: walletPeriod === 'custom' ? '8px' : '12px' }}>
+                  <select
+                    className="form-control"
+                    value={String(walletPeriod)}
+                    onChange={e => setWalletPeriod(e.target.value === '30' ? 30 : e.target.value === '90' ? 90 : e.target.value === '365' ? 365 : e.target.value as any)}
+                    style={{ height: '40px', fontSize: '13px' }}
+                  >
+                    <option value="month">Tháng này</option>
+                    <option value="30">30 ngày gần nhất</option>
+                    <option value="90">90 ngày gần nhất</option>
+                    <option value="365">1 năm gần nhất</option>
+                    <option value="custom">Tùy chỉnh...</option>
+                  </select>
+                </div>
+
+                {walletPeriod === 'custom' && (
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', alignItems: 'center' }}>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={walletDateFrom}
+                      onChange={e => setWalletDateFrom(e.target.value)}
+                      style={{ flex: 1, height: '40px', fontSize: '13px' }}
+                    />
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '13px', flexShrink: 0 }}>→</span>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={walletDateTo}
+                      min={walletDateFrom}
+                      onChange={e => setWalletDateTo(e.target.value)}
+                      style={{ flex: 1, height: '40px', fontSize: '13px' }}
+                    />
+                  </div>
+                )}
+
+                {/* Type filter chips */}
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '16px' }}>
+                  {typeFilters.map(f => (
+                    <button
+                      key={f.key}
+                      type="button"
+                      onClick={() => setWalletTxTypeFilter(f.key)}
+                      style={{
+                        flex: 1, padding: '7px 4px', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: 'pointer',
+                        border: walletTxTypeFilter === f.key ? 'none' : '1px solid var(--border)',
+                        backgroundColor: walletTxTypeFilter === f.key ? 'var(--text-primary)' : 'var(--bg-card)',
+                        color: walletTxTypeFilter === f.key ? 'var(--bg-card)' : 'var(--text-secondary)',
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Transactions list grouped by date */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {Object.keys(groupedWalletTransactions).length === 0 ? (
+                    <p style={{ textAlign: 'center', padding: '32px', color: 'var(--text-secondary)', fontSize: '14px' }}>
+                      Không có giao dịch nào trong khoảng thời gian này.
+                    </p>
+                  ) : (
+                    Object.keys(groupedWalletTransactions).map(dateStr => {
+                      const dayTxs = groupedWalletTransactions[dateStr];
+                      const netChange = getDailyNetChange(dayTxs);
+                      return (
+                        <div key={dateStr} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 4px', borderBottom: '1px solid var(--border)', fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                            <span>{getFormattedDateHeader(dateStr)}</span>
+                            <span style={{ color: netChange > 0 ? 'var(--secondary)' : netChange < 0 ? 'var(--danger)' : 'var(--text-secondary)' }}>
+                              {netChange > 0 ? '+' : ''}{netChange.toLocaleString('vi-VN')} đ
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {dayTxs.map(t => renderTransactionRow(t, true))}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
-            </div>
-          )
+            );
+          })()
         ) : (
           /* Budget Detail view */
           selectedBudgetForDetail && (
@@ -947,14 +1142,16 @@ export default function DashboardPage() {
       </PullToRefresh>
 
       {/* Custom Transaction Modal Component */}
-      <TransactionModal 
-        isOpen={modalOpen} 
+      <TransactionModal
+        isOpen={modalOpen}
         onClose={() => {
           setModalOpen(false);
           setSelectedTransaction(null);
-        }} 
+          setModalDefaultType(undefined);
+        }}
         transactionToEdit={selectedTransaction || undefined}
         defaultWalletId={view === 'wallet_detail' && selectedWalletIdForDetail ? selectedWalletIdForDetail : undefined}
+        defaultType={modalDefaultType}
       />
     </>
   );

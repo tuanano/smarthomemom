@@ -12,9 +12,10 @@ interface TransactionModalProps {
   onClose: () => void;
   transactionToEdit?: Transaction;
   defaultWalletId?: string;
+  defaultType?: 'income' | 'expense' | 'transfer';
 }
 
-export default function TransactionModal({ isOpen, onClose, transactionToEdit, defaultWalletId }: TransactionModalProps) {
+export default function TransactionModal({ isOpen, onClose, transactionToEdit, defaultWalletId, defaultType }: TransactionModalProps) {
   const { family, wallets, createTransaction, updateTransaction, deleteTransaction, customCategories } = useFamilyStore();
   const confirm = useConfirm();
   const showToast = useToast();
@@ -87,7 +88,7 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
         setSpentBy(transactionToEdit.spentBy || '');
         setShowKeypad(false); // Hide keypad by default when viewing/editing existing tx
       } else {
-        setType('expense');
+        setType(defaultType || 'expense');
         setAmountExpr('');
         const spendingWallets = wallets.filter(w => w.includeInBalance !== false);
         const fallbackWallet = spendingWallets[0] ?? wallets[0];
@@ -96,8 +97,9 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
         const otherWallet = wallets.find(w => w.walletId !== defaultId) ?? wallets[1];
         setTargetWalletId(otherWallet?.walletId || (wallets[0]?.walletId || ''));
         
-        // Initialize default category
-        const defaultCat = mergedCategories.find(c => c.type === 'expense');
+        // Initialize default category matching the type
+        const resolvedType = defaultType || 'expense';
+        const defaultCat = mergedCategories.find(c => c.type === resolvedType);
         setSelectedCategory(defaultCat ? defaultCat.name : 'Khác');
         
         setNote('');

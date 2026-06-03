@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area,
   XAxis, Tooltip, CartesianGrid
@@ -25,10 +25,28 @@ const fmtShort = (n: number) => {
 
 export default function BudgetDetailPage({ budget, transactions, onBack }: Props) {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth(); // 0-based
+  const [viewDate, setViewDate] = useState(() => ({
+    year: now.getFullYear(),
+    month: now.getMonth(), // 0-based
+  }));
+
+  const year = viewDate.year;
+  const month = viewDate.month;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const today = now.getDate(); // 1-based day
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth();
+  // For past months use last day; for current month use today
+  const today = isCurrentMonth ? now.getDate() : daysInMonth;
+
+  const prevMonth = () => setViewDate(v => {
+    const d = new Date(v.year, v.month - 1, 1);
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+  const nextMonth = () => setViewDate(v => {
+    const next = new Date(v.year, v.month + 1, 1);
+    const isAfterNow = next > new Date(now.getFullYear(), now.getMonth(), 1);
+    if (isAfterNow) return v; // không cho xem tương lai
+    return { year: next.getFullYear(), month: next.getMonth() };
+  });
 
   const dailyBudget = budget.limitAmount / daysInMonth;
 
@@ -74,16 +92,17 @@ export default function BudgetDetailPage({ budget, transactions, onBack }: Props
     return Object.values(dailySpending).reduce((s, v) => s + v, 0);
   }, [dailySpending]);
 
-  const accumulatedBalance = todayRow.carryOver;
+  const accumulatedBalance = todayRow.carryOver;   // carry-over từ hôm qua, dùng cho display
+  const todayBalance = todayRow.variance;           // số dư sau khi chi hôm nay, dùng cho status
   const availableToday = todayRow.available;
   const spentToday = todayRow.spent;
 
-  // Status classification
+  // Status classification — dựa trên số dư sau khi trừ chi tiêu hôm nay
   type Status = 'saving' | 'on_track' | 'warning' | 'over_budget';
   const status: Status =
-    accumulatedBalance >= dailyBudget * 0.3 ? 'saving' :
-    accumulatedBalance >= 0 ? 'on_track' :
-    accumulatedBalance >= -dailyBudget * 0.5 ? 'warning' : 'over_budget';
+    todayBalance >= dailyBudget * 0.3 ? 'saving' :
+    todayBalance >= 0 ? 'on_track' :
+    todayBalance >= -dailyBudget * 0.5 ? 'warning' : 'over_budget';
 
   // End-of-month forecast based on current average daily spend
   const remainingDays = daysInMonth - today;
@@ -165,11 +184,22 @@ export default function BudgetDetailPage({ budget, transactions, onBack }: Props
         >
           <ArrowLeft size={18} />
         </button>
-        <div>
+        <div style={{ flex: 1 }}>
           <h2 style={{ fontSize: '18px', fontWeight: 800 }}>Chi tiết Hạn mức</h2>
           <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            {budget.category} · Tháng {month + 1}/{year}
+            {budget.category}
           </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+          <button type="button" onClick={prevMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px', borderRadius: '50%', backgroundColor: 'var(--bg-grey)', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-primary)' }}>
+            <ChevronLeft size={16} />
+          </button>
+          <span style={{ fontSize: '13px', fontWeight: 700, minWidth: '72px', textAlign: 'center' }}>
+            T{month + 1}/{year}
+          </span>
+          <button type="button" onClick={nextMonth} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '6px', borderRadius: '50%', backgroundColor: isCurrentMonth ? 'var(--bg-grey)' : 'var(--bg-grey)', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: isCurrentMonth ? 'var(--border)' : 'var(--text-primary)' }}>
+            <ChevronRight size={16} />
+          </button>
         </div>
       </div>
 
@@ -228,9 +258,9 @@ export default function BudgetDetailPage({ budget, transactions, onBack }: Props
             <div style={{ fontSize: '32px', fontWeight: 900, color: st.color, lineHeight: 1.1 }}>
               {availableToday >= 0 ? fmtVND(Math.round(availableToday)) : '0 đ'}
             </div>
-            {availableToday < 0 && (
+            {todayBalance < 0 && (
               <div style={{ fontSize: '12px', color: '#E63946', fontWeight: 700, marginTop: '2px' }}>
-                Đã vượt {fmtVND(Math.abs(Math.round(availableToday)))}
+                Đã vượt {fmtVND(Math.abs(Math.round(todayBalance)))}
               </div>
             )}
           </div>
@@ -269,17 +299,17 @@ export default function BudgetDetailPage({ budget, transactions, onBack }: Props
         </div>
       </div>
 
-      {/* ── 3. Forecast Card ── */}
+      {/* ── 3. Forecast Card (tháng hiện tại) / Tổng kết (tháng đã qua) ── */}
       <div className="card" style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <h3 style={{ fontSize: '14px', fontWeight: 700 }}>Dự báo cuối tháng</h3>
+          <h3 style={{ fontSize: '14px', fontWeight: 700 }}>{isCurrentMonth ? 'Dự báo cuối tháng' : 'Tổng kết tháng'}</h3>
           <span style={{
             backgroundColor: fc.color + '22', color: fc.color,
             borderRadius: '12px', padding: '4px 10px', fontSize: '11px', fontWeight: 700
           }}>{fc.label}</span>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          {[
+          {(isCurrentMonth ? [
             {
               label: 'Dự kiến chi',
               value: fmtVND(Math.round(projectedSpending)),
@@ -295,7 +325,23 @@ export default function BudgetDetailPage({ budget, transactions, onBack }: Props
               value: `${remainingDays} ngày`,
               color: 'var(--text-primary)'
             },
-          ].map(item => (
+          ] : [
+            {
+              label: 'Tổng đã chi',
+              value: fmtVND(totalSpent),
+              color: monthRemaining < 0 ? '#E63946' : 'var(--text-primary)'
+            },
+            {
+              label: monthRemaining >= 0 ? 'Tiết kiệm được' : 'Vượt hạn mức',
+              value: fmtVND(Math.abs(monthRemaining)),
+              color: monthRemaining >= 0 ? '#81B29A' : '#E63946'
+            },
+            {
+              label: 'Tỷ lệ sử dụng',
+              value: `${(totalRatio * 100).toFixed(0)}%`,
+              color: totalRatio > 1 ? '#E63946' : totalRatio > 0.9 ? '#F4A261' : '#81B29A'
+            },
+          ]).map(item => (
             <div key={item.label} style={{ flex: 1, backgroundColor: 'var(--bg-grey)', borderRadius: '10px', padding: '10px 8px' }}>
               <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginBottom: '3px' }}>{item.label}</div>
               <div style={{ fontSize: '12px', fontWeight: 700, color: item.color }}>{item.value}</div>
