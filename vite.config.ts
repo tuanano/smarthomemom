@@ -9,7 +9,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      injectRegister: 'auto',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'maskable-icon.png'],
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
+        navigateFallback: null,
+      },
       manifest: {
         name: "SmartHomeMom - Chi Tiêu & Thực Đơn Gia Đình",
         short_name: "SmartHomeMom",
@@ -18,23 +23,28 @@ export default defineConfig({
         background_color: "#FFFDF9",
         display: "standalone",
         orientation: "portrait-primary",
-        start_url: "/",
+        start_url: "/smarthomemom/",
+        scope: "/smarthomemom/",
+        lang: "vi",
+        categories: ["finance", "lifestyle"],
         icons: [
           {
             src: 'pwa-192x192.png',
             sizes: '192x192',
-            type: 'image/png'
-          },
-          {
-            src: 'pwa-512x512.png',
-            sizes: '512x512',
-            type: 'image/png'
+            type: 'image/png',
+            purpose: 'any'
           },
           {
             src: 'pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
-            purpose: 'any maskable'
+            purpose: 'any'
+          },
+          {
+            src: 'maskable-icon.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable'
           }
         ]
       }

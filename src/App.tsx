@@ -10,6 +10,7 @@ import MenuPage from './features/menu/MenuPage';
 import LocalPantry from './features/menu/LocalPantry';
 import SettingsPage from './features/settings/SettingsPage';
 import TransactionModal from './features/budget/TransactionModal';
+import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { Wallet, ChefHat, ShoppingBasket, Loader2, Settings, Plus } from 'lucide-react';
 
 export default function App() {
@@ -174,6 +175,9 @@ export default function App() {
         isOpen={addModalOpen}
         onClose={() => setAddModalOpen(false)}
       />
+
+      {/* PWA install prompt — Android banner or iOS instructions */}
+      <PWAInstallPrompt />
 
       <style>{`
         .bottom-nav-item:active {
