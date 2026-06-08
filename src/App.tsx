@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, getRedirectResult } from 'firebase/auth';
 import { auth } from './firebase';
 import { useAuthStore } from './stores/authStore';
 import { useFamilyStore } from './stores/familyStore';
@@ -15,7 +15,7 @@ import { Wallet, ChefHat, ShoppingBasket, Loader2, Settings, Plus } from 'lucide
 import AppLogo from './components/AppLogo';
 
 export default function App() {
-  const { user, loading, setUser, setLoading } = useAuthStore();
+  const { user, loading, setUser, setLoading, setRedirectError } = useAuthStore();
   const {
     family,
     familyLoading,
@@ -38,25 +38,46 @@ export default function App() {
   const [addModalOpen, setAddModalOpen] = useState(false);
 
   // Auth Listener
+  // getRedirectResult MUST run before onAuthStateChanged starts listening.
+  // On iOS Safari, signInWithRedirect stores state in IndexedDB. If onAuthStateChanged
+  // fires first (with null), AuthPage renders but the redirect result is never processed
+  // because Firebase only processes it when getRedirectResult is explicitly called.
   useEffect(() => {
-    return onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setLoading(false);
-      
-      if (!firebaseUser) {
-        // Clear store state on logout
-        setFamily(null);
-        setWallets([]);
-        setTransactions([]);
-        setBudgets([]);
-        setAvailableIngredients([]);
-        setCustomCategories([]);
-        setCustomIngredients([]);
-        setFavoriteMenus([]);
-        // Reset familyLoading so next login waits for Firestore before showing Onboarding
-        useFamilyStore.setState({ familyLoading: true });
-      }
-    });
+    let unsubAuth: (() => void) | undefined;
+
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          console.log('[Auth] redirect sign-in OK:', result.user.email);
+          setRedirectError(null);
+        }
+      })
+      .catch((err: any) => {
+        const msg = `${err?.code ?? 'unknown'}: ${err?.message ?? ''}`;
+        console.error('[Auth] getRedirectResult error:', msg);
+        setRedirectError(msg);
+      })
+      .finally(() => {
+        // Start listening for auth state AFTER redirect result is processed
+        unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
+          setUser(firebaseUser);
+          setLoading(false);
+
+          if (!firebaseUser) {
+            setFamily(null);
+            setWallets([]);
+            setTransactions([]);
+            setBudgets([]);
+            setAvailableIngredients([]);
+            setCustomCategories([]);
+            setCustomIngredients([]);
+            setFavoriteMenus([]);
+            useFamilyStore.setState({ familyLoading: true });
+          }
+        });
+      });
+
+    return () => unsubAuth?.();
   }, []);
 
   // Firestore Subscriptions when user logged in
@@ -88,7 +109,8 @@ export default function App() {
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: 'var(--bg-cream)',
-        gap: '16px'
+        gap: '16px',
+        animation: 'authFadeIn 0.18s ease',
       }}>
         <div style={{ borderRadius: '20px', overflow: 'hidden', boxShadow: '0 4px 16px rgba(255,140,105,0.3)' }}>
           <AppLogo size={72} />

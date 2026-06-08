@@ -1,15 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
+import React, { useState } from 'react';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth } from '../../firebase';
-
-// iOS PWA standalone mode does not support popups — must use redirect flow
-const isIOSStandalone = typeof window !== 'undefined' &&
-  'standalone' in window.navigator &&
-  (window.navigator as any).standalone === true;
 import { Lock, Mail } from 'lucide-react';
 import AppLogo from '../../components/AppLogo';
+import { useAuthStore } from '../../stores/authStore';
+
 
 export default function AuthPage() {
+  const { redirectError, setLoading: setAppLoading } = useAuthStore();
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,14 +18,18 @@ export default function AuthPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
+    // Show app-level loading screen immediately to avoid flash on success
+    setAppLoading(true);
     try {
       if (isRegister) {
         await createUserWithEmailAndPassword(auth, email, password);
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
+      // Success: onAuthStateChanged will call setAppLoading(false)
     } catch (err: any) {
-      console.error(err);
+      setAppLoading(false); // Reset on failure so AuthPage reappears with error
+      setLoading(false);
       if (err.code === 'auth/invalid-credential') {
         setError('Email hoặc mật khẩu không chính xác.');
       } else if (err.code === 'auth/email-already-in-use') {
@@ -35,39 +37,25 @@ export default function AuthPage() {
       } else {
         setError('Đã xảy ra lỗi, vui lòng thử lại sau.');
       }
-    } finally {
-      setLoading(false);
     }
   };
-
-  // On iOS PWA, after signInWithRedirect returns the user to the app,
-  // getRedirectResult() must be called to complete the auth flow.
-  useEffect(() => {
-    getRedirectResult(auth).catch((err: any) => {
-      if (err?.code && err.code !== 'auth/popup-closed-by-user') {
-        setError('Đăng nhập Google thất bại. Vui lòng thử lại.');
-      }
-    });
-  }, []);
 
   const handleGoogleLogin = async () => {
     setError('');
     setLoading(true);
+    // Show app-level loading screen immediately — eliminates the AuthPage→Dashboard flash
+    setAppLoading(true);
     const provider = new GoogleAuthProvider();
     try {
-      if (isIOSStandalone) {
-        // Redirect flow: navigates away from app, result handled by getRedirectResult on next mount
-        await signInWithRedirect(auth, provider);
-        return;
-      }
       await signInWithPopup(auth, provider);
+      // Success: onAuthStateChanged will call setAppLoading(false)
     } catch (err: any) {
-      console.error(err);
-      if (err.code !== 'auth/popup-closed-by-user') {
-        setError('Đăng nhập Google thất bại. Vui lòng thử lại.');
-      }
-    } finally {
+      setAppLoading(false); // Reset on failure so AuthPage reappears with error
       setLoading(false);
+      const ignoredCodes = ['auth/popup-closed-by-user', 'auth/cancelled-popup-request'];
+      if (!ignoredCodes.includes(err?.code)) {
+        setError(`Đăng nhập Google thất bại: ${err?.code ?? err?.message ?? 'unknown'}`);
+      }
     }
   };
 
@@ -170,30 +158,61 @@ export default function AuthPage() {
       <button
         type="button"
         onClick={handleGoogleLogin}
-        className="btn btn-secondary"
         style={{
           width: '100%',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '10px',
-          border: '1px solid var(--border)',
+          gap: '12px',
+          padding: '14px 20px',
+          border: '1.5px solid #e0e0e0',
+          borderRadius: '14px',
           backgroundColor: '#fff',
           color: '#3c4043',
           fontWeight: 600,
           fontSize: '15px',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.12)'
+          cursor: 'pointer',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          transition: 'box-shadow 0.2s, border-color 0.2s',
+          letterSpacing: '0.01em',
+          opacity: loading ? 0.6 : 1,
         }}
+        onMouseEnter={e => { if (!loading) (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 4px 16px rgba(0,0,0,0.14)'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#bdbdbd'; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; (e.currentTarget as HTMLButtonElement).style.borderColor = '#e0e0e0'; }}
         disabled={loading}
       >
-        <svg width="20" height="20" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
-          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-        </svg>
-        {loading ? 'Đang xử lý...' : 'Đăng nhập với Google'}
+        {/* Google icon with white circle background */}
+        <span style={{
+          width: '24px', height: '24px', borderRadius: '50%',
+          backgroundColor: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+        }}>
+          <svg width="18" height="18" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+            <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+            <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+            <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+            <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+          </svg>
+        </span>
+        <span>{loading ? 'Đang xử lý...' : 'Tiếp tục với Google'}</span>
       </button>
+
+      {/* Debug panel — shows Firebase auth errors directly on screen for mobile debugging */}
+      {(redirectError || error) && !error && redirectError && (
+        <div style={{
+          marginTop: '16px', padding: '12px', borderRadius: '10px',
+          backgroundColor: '#FFF3E0', border: '1px solid #FFB74D',
+          fontSize: '12px', color: '#E65100', wordBreak: 'break-all', lineHeight: 1.5
+        }}>
+          <strong>Debug:</strong> {redirectError}
+          {redirectError.includes('unauthorized-domain') && (
+            <div style={{ marginTop: '6px', color: '#BF360C' }}>
+              Thêm domain GitHub Pages vào Firebase Console → Authentication → Authorized domains
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
