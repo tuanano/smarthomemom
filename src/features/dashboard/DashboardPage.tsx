@@ -3,6 +3,7 @@ import CurrencyInput from '../../components/CurrencyInput';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
+import { useNotificationStore } from '../../stores/notificationStore';
 import type { Budget, Transaction } from '../../types';
 import { getMergedCategories } from '../../core/constants';
 import { Wallet as WalletIcon, TrendingDown, TrendingUp, AlertTriangle, Trash2, PiggyBank, Coins, CreditCard, ArrowRightLeft, ChevronRight, ArrowLeft, HelpCircle, Eye, EyeOff, Plus, Minus, Pencil, X, Check } from 'lucide-react';
@@ -28,6 +29,8 @@ export default function DashboardPage() {
   } = useFamilyStore();
 
   const mergedCategories = getMergedCategories(customCategories);
+
+  const { banners, dismissBanner } = useNotificationStore();
 
   const linkedMember = user && family
     ? family.members.find(m => m.id === family.linkedMemberIds?.[user.uid])
@@ -489,6 +492,30 @@ export default function DashboardPage() {
               <h2 style={{ fontSize: '20px' }}>Chào {greetingName}, {family?.familyName}!</h2>
               <p style={{ fontSize: '12px' }}>Hôm nay là {new Date().toLocaleDateString('vi-VN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
             </div>
+
+            {/* In-app reminder banners */}
+            {banners.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+                {banners.map((banner) => (
+                  <div key={banner.id} style={{
+                    display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+                    gap: '10px', padding: '12px 14px',
+                    borderRadius: 'var(--border-radius-sm)',
+                    backgroundColor: banner.type === 'budget' ? '#FFF8E1' : '#FFF3E0',
+                    border: `1px solid ${banner.type === 'budget' ? '#FFB300' : '#FF8C00'}`,
+                  }}>
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: '#5D4037', lineHeight: 1.4, flex: 1 }}>{banner.message}</span>
+                    <button
+                      onClick={() => dismissBanner(banner.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9E6B00', padding: '0', flexShrink: 0, display: 'flex', alignItems: 'center' }}
+                      aria-label="Đóng"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Balance Widget Card */}
             <div className="card" style={{

@@ -13,8 +13,10 @@ import TransactionModal from './features/budget/TransactionModal';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { Wallet, ChefHat, ShoppingBasket, Loader2, Settings, Plus } from 'lucide-react';
 import AppLogo from './components/AppLogo';
+import { useReminderService } from './hooks/useReminderService';
 
 export default function App() {
+  useReminderService();
   const { user, loading, setUser, setLoading, setRedirectError } = useAuthStore();
   const {
     family,
