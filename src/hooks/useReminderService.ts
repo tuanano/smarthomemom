@@ -5,6 +5,11 @@ import { useAuthStore } from '../stores/authStore';
 import { useFamilyStore } from '../stores/familyStore';
 import { useNotificationStore } from '../stores/notificationStore';
 import { playNotificationSound } from '../utils/notificationSound';
+import {
+  syncNotificationSettingsToSW,
+  syncDailyStatusToSW,
+  registerPeriodicSync,
+} from '../utils/swStatusCache';
 import { format } from 'date-fns';
 
 async function fireNotification(title: string, body: string): Promise<void> {
@@ -65,11 +70,60 @@ export function useReminderService() {
   const transactionsRef = useRef(transactions);
   transactionsRef.current = transactions;
 
+  // ── Sync settings to Cache API for Service Worker (background notifications) ──
+  useEffect(() => {
+    syncNotificationSettingsToSW({
+      enabled,
+      expenseReminderEnabled,
+      expenseReminderHour,
+      expenseReminderMinute,
+      menuReminderEnabled,
+      menuReminderHour,
+      menuReminderMinute,
+    });
+  }, [enabled, expenseReminderEnabled, expenseReminderHour, expenseReminderMinute,
+      menuReminderEnabled, menuReminderHour, menuReminderMinute]);
+
+  // ── Sync daily status to Cache API for Service Worker ───────────────────
+  useEffect(() => {
+    if (!user) return;
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const hasTransactionsToday = transactions.some((t) => {
+      const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      return format(d, 'yyyy-MM-dd') === today;
+    });
+    // Check menu asynchronously (Firestore offline cache keeps this fast)
+    // Menu is stored by day-of-week key ('monday'…'sunday'), not ISO date
+    const todayDayKey = format(new Date(), 'EEEE').toLowerCase();
+    getDoc(doc(db, 'families', user.uid, 'menus', 'weekly_plan'))
+      .then((snap) => {
+        const days = snap.exists() ? (snap.data().days ?? {}) : {};
+        const todayMeals = days[todayDayKey];
+        const hasMenuToday = !!(
+          todayMeals &&
+          (todayMeals.breakfast?.length || todayMeals.lunch?.length || todayMeals.dinner?.length)
+        );
+        syncDailyStatusToSW({ date: today, hasTransactionsToday, hasMenuToday });
+      })
+      .catch(() => {
+        syncDailyStatusToSW({ date: today, hasTransactionsToday, hasMenuToday: false });
+      });
+  }, [user, transactions]);
+
+  // ── Register Periodic Background Sync (fires even when app is closed) ───
+  useEffect(() => {
+    if (!user || !enabled) return;
+    registerPeriodicSync();
+  }, [user, enabled]);
+
+  // ── Monthly budget dedup reset ──────────────────────────────────────────
+  useEffect(() => {
+    if (user) checkAndResetBudgetMonth();
+  }, [user]);
+
   // ── Budget alert (reactive) ─────────────────────────────────────────────
   useEffect(() => {
     if (!user || !enabled || !budgetAlertEnabled || budgets.length === 0) return;
-
-    checkAndResetBudgetMonth();
 
     const now = new Date();
     const currentMonth = now.getMonth();
@@ -138,10 +192,12 @@ export function useReminderService() {
       scheduleAt(menuReminderHour, menuReminderMinute, lastMenuReminderDate, async () => {
         if (!user) return;
         const todayStr = format(new Date(), 'yyyy-MM-dd');
+        // Menu stored by day-of-week key, not ISO date
+        const todayKey = format(new Date(), 'EEEE').toLowerCase();
         try {
           const snap = await getDoc(doc(db, 'families', user.uid, 'menus', 'weekly_plan'));
           const days = snap.exists() ? (snap.data().days ?? {}) : {};
-          const todayMeals = days[todayStr];
+          const todayMeals = days[todayKey];
           const isEmpty =
             !todayMeals ||
             (!todayMeals.breakfast?.length &&
@@ -159,5 +215,7 @@ export function useReminderService() {
     }
 
     return () => timers.forEach(clearTimeout);
-  }, [user, enabled, expenseReminderEnabled, expenseReminderHour, expenseReminderMinute, menuReminderEnabled, menuReminderHour, menuReminderMinute]);
+  }, [user, enabled, expenseReminderEnabled, expenseReminderHour, expenseReminderMinute,
+      menuReminderEnabled, menuReminderHour, menuReminderMinute,
+      lastExpenseReminderDate, lastMenuReminderDate]);
 }

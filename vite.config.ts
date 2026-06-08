@@ -8,16 +8,14 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'maskable-icon.png'],
-      workbox: {
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
-        navigateFallback: 'index.html',
-        navigateFallbackDenylist: [/^\/api\//],
-        cleanupOutdatedCaches: true,
-        skipWaiting: true,
-        clientsClaim: true,
       },
       manifest: {
         name: "SmartHomeMom - Chi Tiêu & Thực Đơn Gia Đình",

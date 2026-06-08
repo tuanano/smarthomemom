@@ -71,7 +71,7 @@ export const DEFAULT_INGREDIENTS: CustomIngredient[] = [
   { id: 'rau_cai_ngot', name: 'Cải ngọt', category: 'vegetables' },
   { id: 'ca_chua', name: 'Cà chua', category: 'vegetables' },
   { id: 'bi_do', name: 'Bí đỏ', category: 'vegetables' },
-  { id: 'bap_cai', name: 'Bắp cabbage', category: 'vegetables' },
+  { id: 'bap_cai', name: 'Bắp cải', category: 'vegetables' },
   { id: 'muop_huong', name: 'Mướp hương', category: 'vegetables' },
   
   // Fruits

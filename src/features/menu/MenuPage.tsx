@@ -222,7 +222,12 @@ export default function MenuPage() {
 
     const updatedMenu = { ...weeklyMenu, [selectedDay]: newDayMenu };
     setWeeklyMenu(updatedMenu);
-    await saveMenuToFirestore(updatedMenu);
+    try {
+      await saveMenuToFirestore(updatedMenu);
+    } catch {
+      showToast("Lỗi khi lưu thực đơn, vui lòng thử lại", "error");
+      setWeeklyMenu(weeklyMenu); // rollback local state
+    }
     setShowAddModal(false);
     setEditingMeal(null);
     setAddModalInitialMeal(null);
@@ -254,7 +259,12 @@ export default function MenuPage() {
 
     const updatedMenu = { ...weeklyMenu, [selectedDay]: newDayMenu };
     setWeeklyMenu(updatedMenu);
-    await saveMenuToFirestore(updatedMenu);
+    try {
+      await saveMenuToFirestore(updatedMenu);
+    } catch {
+      showToast("Lỗi khi xóa món, vui lòng thử lại", "error");
+      setWeeklyMenu(weeklyMenu); // rollback local state
+    }
   };
 
   // Delete the entire menu for the selected day

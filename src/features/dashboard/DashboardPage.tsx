@@ -63,17 +63,29 @@ export default function DashboardPage() {
   const [dateTo, setDateTo] = useState('');
 
 
-  // Calculate totals — chỉ tính ví chi tiêu (includeInBalance !== false)
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  // Calculate totals — chỉ tính ví chi tiêu (includeInBalance !== false), lọc theo tháng hiện tại
   const totalBalance = wallets
     .filter(w => w.includeInBalance !== false)
     .reduce((sum, w) => sum + w.balance, 0);
-  
+
   const totalIncome = transactions
-    .filter(t => t.type === 'income')
+    .filter(t => {
+      if (t.type !== 'income') return false;
+      const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    })
     .reduce((sum, t) => sum + t.amount, 0);
 
   const totalExpense = transactions
-    .filter(t => t.type === 'expense')
+    .filter(t => {
+      if (t.type !== 'expense') return false;
+      const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    })
     .reduce((sum, t) => sum + t.amount, 0);
 
   // Dynamic budget calculation based on current transactions of the month
@@ -93,7 +105,6 @@ export default function DashboardPage() {
 
   const handleAddBudget = async () => {
     if (!user) return;
-    const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
     const newB: Budget = {
@@ -187,10 +198,14 @@ export default function DashboardPage() {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   };
 
-  // Chart Data preparation
+  // Chart Data preparation — chỉ chi tiêu tháng hiện tại
   const categorySummary: { [key: string]: number } = {};
   transactions
-    .filter(t => t.type === 'expense')
+    .filter(t => {
+      if (t.type !== 'expense') return false;
+      const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    })
     .forEach(t => {
       categorySummary[t.category] = (categorySummary[t.category] || 0) + t.amount;
     });
@@ -547,13 +562,13 @@ export default function DashboardPage() {
 
               <div style={{ display: 'flex', gap: '20px', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: '12px' }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '11px', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '4px' }}><TrendingUp size={12} /> Tổng thu</div>
+                  <div style={{ fontSize: '11px', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '4px' }}><TrendingUp size={12} /> Thu tháng này</div>
                   <div style={{ fontSize: '15px', fontWeight: 700 }}>
                     {showBalance ? `+${totalIncome.toLocaleString('vi-VN')}đ` : '••••'}
                   </div>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: '11px', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '4px' }}><TrendingDown size={12} /> Tổng chi</div>
+                  <div style={{ fontSize: '11px', opacity: 0.8, display: 'flex', alignItems: 'center', gap: '4px' }}><TrendingDown size={12} /> Chi tháng này</div>
                   <div style={{ fontSize: '15px', fontWeight: 700 }}>
                     {showBalance ? `-${totalExpense.toLocaleString('vi-VN')}đ` : '••••'}
                   </div>
@@ -563,7 +578,7 @@ export default function DashboardPage() {
 
             {/* Wallets detail */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-              {wallets.filter(w => w.includeInBalance !== false).map(w => {
+              {wallets.map(w => {
                 const WalIcon = w.type === 'cash' ? Coins : w.type === 'bank' ? CreditCard : PiggyBank;
                 const isSaving = w.includeInBalance === false;
                 return (

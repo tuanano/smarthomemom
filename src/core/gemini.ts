@@ -163,8 +163,10 @@ JSON duy nhất, không markdown:
         })
       }
     );
+    if (!response.ok) throw new Error(`AI API ${response.status}`);
     const json = await response.json();
-    const textResult = json.candidates[0].content.parts[0].text;
+    const textResult = json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textResult) throw new Error('Empty AI response');
     return JSON.parse(textResult) as DailyMenuResponse;
   } catch (err) {
     console.error("Gemini API call failed, falling back to mock: ", err);
@@ -225,8 +227,10 @@ JSON array, không markdown:
         })
       }
     );
+    if (!response.ok) throw new Error(`AI API ${response.status}`);
     const json = await response.json();
-    const textResult = json.candidates[0].content.parts[0].text;
+    const textResult = json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textResult) throw new Error('Empty AI response');
     return JSON.parse(textResult) as MealOption[];
   } catch (err) {
     console.error("Meal suggestion API failed:", err);
@@ -260,8 +264,10 @@ Trả JSON (không markdown):
         })
       }
     );
+    if (!response.ok) throw new Error(`Gemini API ${response.status}`);
     const json = await response.json();
-    const textResult = json.candidates[0].content.parts[0].text;
+    const textResult = json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textResult) throw new Error('Empty Gemini response');
     return JSON.parse(textResult) as CalorieEstimate;
   } catch (err) {
     console.error("Calorie estimate API failed:", err);
@@ -290,8 +296,11 @@ Không thêm bất kỳ nội dung nào ngoài format trên.`;
         body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
       }
     );
+    if (!response.ok) throw new Error(`Gemini API ${response.status}`);
     const json = await response.json();
-    return json.candidates[0].content.parts[0].text as string;
+    const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error('Empty Gemini response');
+    return text as string;
   } catch (err) {
     console.error('Cooking guide API failed:', err);
     return getCookingGuideMock(dishName);

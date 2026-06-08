@@ -210,6 +210,10 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
       showToast("Vui lòng chọn ví thanh toán", "warning");
       return;
     }
+    if (type === 'transfer' && !targetWalletId) {
+      showToast("Vui lòng chọn ví nhận", "warning");
+      return;
+    }
     if (type === 'transfer' && selectedWalletId === targetWalletId) {
       showToast("Ví chuyển và ví nhận phải khác nhau", "warning");
       return;
@@ -349,8 +353,6 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
                   setType(t);
                   const defaultCat = mergedCategories.find(c => c.type === t);
                   setSelectedCategory(defaultCat ? defaultCat.name : 'Khác');
-                  setNote('');
-                  setAmountExpr('');
                 }}
                 style={{
                   flex: 1,

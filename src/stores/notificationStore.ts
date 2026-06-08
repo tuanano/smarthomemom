@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { syncNotificationSettingsToSW } from '../utils/swStatusCache';
 
 export interface NotificationBanner {
   id: string;
@@ -60,7 +61,20 @@ export const useNotificationStore = create<NotificationState>()(
 
       banners: [],
 
-      updateSettings: (s) => set((prev) => ({ ...prev, ...s })),
+      updateSettings: (s) => {
+        const prev = get();
+        const next = { ...prev, ...s };
+        set(next);
+        syncNotificationSettingsToSW({
+          enabled: next.enabled,
+          expenseReminderEnabled: next.expenseReminderEnabled,
+          expenseReminderHour: next.expenseReminderHour,
+          expenseReminderMinute: next.expenseReminderMinute,
+          menuReminderEnabled: next.menuReminderEnabled,
+          menuReminderHour: next.menuReminderHour,
+          menuReminderMinute: next.menuReminderMinute,
+        });
+      },
 
       markExpenseReminder: (date) => set({ lastExpenseReminderDate: date }),
 

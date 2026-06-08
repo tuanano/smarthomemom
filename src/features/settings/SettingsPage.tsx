@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import CurrencyInput from '../../components/CurrencyInput';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
@@ -153,6 +153,7 @@ export default function SettingsPage() {
     transactions,
     saveFamily,
     createWallet,
+    updateWallet,
     deleteWallet,
     saveBudget,
     deleteBudget,
@@ -183,6 +184,18 @@ export default function SettingsPage() {
     if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported';
     return Notification.permission;
   });
+  const [bgSyncActive, setBgSyncActive] = useState(false);
+
+  // Re-check background sync registration whenever user opens the notifications view
+  useEffect(() => {
+    if (view !== 'notifications' || !('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.ready
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then((reg) => (reg as any).periodicSync?.getTags?.() as Promise<string[]> | undefined)
+      .then((tags) => setBgSyncActive(!!(tags?.includes('smm-reminders'))))
+      .catch(() => {});
+  }, [view]);
+
   const [copiedFamilyId, setCopiedFamilyId] = useState(false);
 
   // --- ACCOUNT SUB-SCREENS STATE ---
@@ -377,33 +390,40 @@ export default function SettingsPage() {
   const handleCreateWallet = async () => {
     if (!newWalletName.trim()) return;
     const walletId = 'wallet_' + Date.now().toString();
-    await createWallet(user.uid, {
-      walletId,
-      name: newWalletName.trim(),
-      type: newWalletType,
-      balance: newWalletBalance,
-      colorCode: newWalletType === 'cash' ? '#FF8C69' : newWalletType === 'bank' ? '#4EA8DE' : '#81B29A',
-      iconName: newWalletType === 'cash' ? 'Coins' : newWalletType === 'bank' ? 'CreditCard' : 'PiggyBank',
-      includeInBalance: newWalletIncludeInBalance
-    });
-    if (newWalletIsDefault) {
-      await saveFamily({ ...family, defaultWalletId: walletId });
+    try {
+      await createWallet(user.uid, {
+        walletId,
+        name: newWalletName.trim(),
+        type: newWalletType,
+        balance: newWalletBalance,
+        colorCode: newWalletType === 'cash' ? '#FF8C69' : newWalletType === 'bank' ? '#4EA8DE' : '#81B29A',
+        iconName: newWalletType === 'cash' ? 'Coins' : newWalletType === 'bank' ? 'CreditCard' : 'PiggyBank',
+        includeInBalance: newWalletIncludeInBalance
+      });
+      if (newWalletIsDefault) {
+        await saveFamily({ ...family, defaultWalletId: walletId });
+      }
+      setNewWalletName('');
+      setNewWalletIsDefault(false);
+      setNewWalletIncludeInBalance(true);
+      setShowAddWallet(false);
+    } catch {
+      showToast("Lỗi khi tạo ví, vui lòng thử lại", "error");
     }
-    setNewWalletName('');
-    setNewWalletIsDefault(false);
-    setNewWalletIncludeInBalance(true);
-    setShowAddWallet(false);
   };
 
   const handleUpdateWallet = async (w: Wallet) => {
     if (!editWalletName.trim()) return;
-    await createWallet(user.uid, {
-      ...w,
-      name: editWalletName.trim(),
-      balance: editWalletBalance,
-      includeInBalance: editWalletIncludeInBalance
-    });
-    setEditingWalletId(null);
+    try {
+      await updateWallet(user.uid, w.walletId, {
+        name: editWalletName.trim(),
+        balance: editWalletBalance,
+        includeInBalance: editWalletIncludeInBalance,
+      });
+      setEditingWalletId(null);
+    } catch {
+      showToast("Lỗi khi cập nhật ví, vui lòng thử lại", "error");
+    }
   };
 
   const handleDeleteWallet = async (walletId: string) => {
@@ -436,27 +456,32 @@ export default function SettingsPage() {
       showToast("Không còn danh mục nào chưa thiết lập hạn mức!", "info");
       return;
     }
-    const budgetId = 'budget_' + cat.replace(/\s+/g, '').replace(/\//g, '');
-    await saveBudget(user.uid, {
-      budgetId,
-      category: cat,
-      limitAmount: newBudgetLimit,
-      spentAmount: 0,
-      period: 'monthly',
-      startDate: new Date(),
-      endDate: new Date(),
-      alertThreshold: 0.8,
-      isAlerted: false
-    });
-    setShowAddBudget(false);
+    try {
+      const budgetId = 'budget_' + cat.replace(/\s+/g, '').replace(/\//g, '');
+      await saveBudget(user.uid, {
+        budgetId,
+        category: cat,
+        limitAmount: newBudgetLimit,
+        spentAmount: 0,
+        period: 'monthly',
+        startDate: new Date(),
+        endDate: new Date(),
+        alertThreshold: 0.8,
+        isAlerted: false
+      });
+      setShowAddBudget(false);
+    } catch {
+      showToast("Lỗi khi tạo hạn mức, vui lòng thử lại", "error");
+    }
   };
 
   const handleUpdateBudget = async (b: Budget) => {
-    await saveBudget(user.uid, {
-      ...b,
-      limitAmount: editBudgetLimit
-    });
-    setEditingBudgetId(null);
+    try {
+      await saveBudget(user.uid, { ...b, limitAmount: editBudgetLimit });
+      setEditingBudgetId(null);
+    } catch {
+      showToast("Lỗi khi cập nhật hạn mức, vui lòng thử lại", "error");
+    }
   };
 
   const handleDeleteBudget = async (budgetId: string) => {
@@ -2911,6 +2936,24 @@ export default function SettingsPage() {
               {permStatus !== 'granted' && (
                 <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '8px', lineHeight: 1.5, position: 'relative' }}>
                   In-app banner vẫn hiện trong app ngay cả khi chưa cấp quyền.
+                </div>
+              )}
+
+              {/* Background Sync status */}
+              {permStatus === 'granted' && (
+                <div style={{
+                  marginTop: '8px',
+                  backgroundColor: 'rgba(0,0,0,0.10)',
+                  borderRadius: '10px', padding: '8px 12px',
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  fontSize: '12px', fontWeight: 700, position: 'relative',
+                }}>
+                  <span style={{ fontSize: '15px' }}>{bgSyncActive ? '⏰' : '📱'}</span>
+                  <span>
+                    {bgSyncActive
+                      ? 'Nhắc nền bật — hoạt động kể cả khi đóng app'
+                      : 'Nhắc nền: chỉ hoạt động khi app đang mở'}
+                  </span>
                 </div>
               )}
             </div>

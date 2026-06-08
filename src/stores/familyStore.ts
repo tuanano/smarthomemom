@@ -46,7 +46,7 @@ interface FamilyState {
   updateTransaction: (familyId: string, oldTx: Transaction, newTx: Transaction) => Promise<void>;
   saveBudget: (familyId: string, budget: Budget) => Promise<void>;
   deleteWallet: (familyId: string, walletId: string) => Promise<void>;
-  updateWallet: (familyId: string, walletId: string, updates: Partial<Pick<Wallet, 'name' | 'colorCode' | 'iconName'>>) => Promise<void>;
+  updateWallet: (familyId: string, walletId: string, updates: Partial<Pick<Wallet, 'name' | 'colorCode' | 'iconName' | 'includeInBalance' | 'balance'>>) => Promise<void>;
   deleteBudget: (familyId: string, budgetId: string) => Promise<void>;
   saveIngredients: (familyId: string, ingredients: string[]) => Promise<void>;
   
@@ -121,44 +121,51 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
           favoriteMenus: familyData.favoriteMenus || [],
           familyLoading: false,
         });
+      },
+      (error) => {
+        console.error('[subscribeFamily] Firestore error:', error);
+        set({ familyLoading: false });
       }
     );
   },
   
   subscribeWallets: (familyId) => {
     const q = query(collection(db, 'families', familyId, 'wallets'), orderBy('createdAt', 'asc'));
-    return onSnapshot(q, (snapshot) => {
-      const walletsList = snapshot.docs.map(doc => doc.data() as Wallet);
-      set({ wallets: walletsList });
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => { set({ wallets: snapshot.docs.map(d => d.data() as Wallet) }); },
+      (error) => { console.error('[subscribeWallets] Firestore error:', error); }
+    );
   },
-  
+
   subscribeTransactions: (familyId) => {
     const q = query(
       collection(db, 'families', familyId, 'transactions'),
       orderBy('date', 'desc')
     );
-    return onSnapshot(q, (snapshot) => {
-      const transList = snapshot.docs.map(doc => doc.data() as Transaction);
-      set({ transactions: transList });
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => { set({ transactions: snapshot.docs.map(d => d.data() as Transaction) }); },
+      (error) => { console.error('[subscribeTransactions] Firestore error:', error); }
+    );
   },
-  
+
   subscribeBudgets: (familyId) => {
-    return onSnapshot(collection(db, 'families', familyId, 'budgets'), (snapshot) => {
-      const budgetsList = snapshot.docs.map(doc => doc.data() as Budget);
-      set({ budgets: budgetsList });
-    });
+    return onSnapshot(
+      collection(db, 'families', familyId, 'budgets'),
+      (snapshot) => { set({ budgets: snapshot.docs.map(d => d.data() as Budget) }); },
+      (error) => { console.error('[subscribeBudgets] Firestore error:', error); }
+    );
   },
-  
+
   subscribeIngredients: (familyId) => {
-    return onSnapshot(doc(db, 'families', familyId, 'settings', 'ingredients'), (docSnap) => {
-      if (docSnap.exists()) {
-        set({ availableIngredients: docSnap.data().availableIngredients || [] });
-      } else {
-        set({ availableIngredients: [] });
-      }
-    });
+    return onSnapshot(
+      doc(db, 'families', familyId, 'settings', 'ingredients'),
+      (docSnap) => {
+        set({ availableIngredients: docSnap.exists() ? (docSnap.data().availableIngredients || []) : [] });
+      },
+      (error) => { console.error('[subscribeIngredients] Firestore error:', error); }
+    );
   },
 
   saveFamily: async (family) => {
@@ -204,12 +211,11 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
         newBalance -= transaction.amount;
         const targetWalletDocRef = doc(db, 'families', familyId, 'wallets', transaction.toWalletId);
         const targetWalletDoc = await firestoreTransaction.get(targetWalletDocRef);
-        if (targetWalletDoc.exists()) {
-          const targetBalance = targetWalletDoc.data().balance || 0;
-          firestoreTransaction.update(targetWalletDocRef, { balance: targetBalance + transaction.amount });
-        }
+        if (!targetWalletDoc.exists()) throw new Error("Ví nhận không tồn tại!");
+        const targetBalance = targetWalletDoc.data().balance || 0;
+        firestoreTransaction.update(targetWalletDocRef, { balance: targetBalance + transaction.amount });
       }
-      
+
       firestoreTransaction.set(transactionDocRef, transaction);
       firestoreTransaction.update(walletDocRef, { balance: newBalance });
     });
@@ -237,12 +243,11 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
         newBalance += transaction.amount;
         const targetWalletDocRef = doc(db, 'families', familyId, 'wallets', transaction.toWalletId);
         const targetWalletDoc = await firestoreTransaction.get(targetWalletDocRef);
-        if (targetWalletDoc.exists()) {
-          const targetBalance = targetWalletDoc.data().balance || 0;
-          firestoreTransaction.update(targetWalletDocRef, { balance: targetBalance - transaction.amount });
-        }
+        if (!targetWalletDoc.exists()) throw new Error("Ví nhận không tồn tại!");
+        const targetBalance = targetWalletDoc.data().balance || 0;
+        firestoreTransaction.update(targetWalletDocRef, { balance: targetBalance - transaction.amount });
       }
-      
+
       firestoreTransaction.delete(transactionDocRef);
       firestoreTransaction.update(walletDocRef, { balance: newBalance });
     });
@@ -310,7 +315,8 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
         newBal -= newTx.amount;
       } else if (newTx.type === 'income') {
         newBal += newTx.amount;
-      } else if (newTx.type === 'transfer' && newTx.toWalletId && newTargetDoc && newTargetDoc.exists()) {
+      } else if (newTx.type === 'transfer' && newTx.toWalletId) {
+        if (!newTargetDoc || !newTargetDoc.exists()) throw new Error("Ví nhận không tồn tại!");
         newBal -= newTx.amount;
         const newTargetRef = doc(db, 'families', familyId, 'wallets', newTx.toWalletId);
         let currentTargetBal = newTargetDoc.data().balance || 0;

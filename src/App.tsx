@@ -45,6 +45,7 @@ export default function App() {
   // fires first (with null), AuthPage renders but the redirect result is never processed
   // because Firebase only processes it when getRedirectResult is explicitly called.
   useEffect(() => {
+    let cancelled = false;
     let unsubAuth: (() => void) | undefined;
 
     getRedirectResult(auth)
@@ -54,12 +55,14 @@ export default function App() {
           setRedirectError(null);
         }
       })
-      .catch((err: any) => {
-        const msg = `${err?.code ?? 'unknown'}: ${err?.message ?? ''}`;
+      .catch((err: unknown) => {
+        const e = err as { code?: string; message?: string };
+        const msg = `${e?.code ?? 'unknown'}: ${e?.message ?? ''}`;
         console.error('[Auth] getRedirectResult error:', msg);
         setRedirectError(msg);
       })
       .finally(() => {
+        if (cancelled) return;
         // Start listening for auth state AFTER redirect result is processed
         unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
           setUser(firebaseUser);
@@ -79,7 +82,10 @@ export default function App() {
         });
       });
 
-    return () => unsubAuth?.();
+    return () => {
+      cancelled = true;
+      unsubAuth?.();
+    };
   }, []);
 
   // Firestore Subscriptions when user logged in

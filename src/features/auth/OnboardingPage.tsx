@@ -2,16 +2,14 @@ import { useState } from 'react';
 import CurrencyInput from '../../components/CurrencyInput';
 import { useToast } from '../../components/Toast';
 import { useAuthStore } from '../../stores/authStore';
-import { useFamilyStore } from '../../stores/familyStore';
 import type { Family, FamilyMember } from '../../types';
 import { Plus, Trash2, Users, Flame, ArrowRight, ArrowLeft, Coins, CreditCard, PiggyBank, Pencil, Check, UserCheck } from 'lucide-react';
 import { DEFAULT_CATEGORIES, DEFAULT_INGREDIENTS } from '../../core/constants';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, writeBatch, collection } from 'firebase/firestore';
 import { db } from '../../firebase';
 
 export default function OnboardingPage() {
   const { user } = useAuthStore();
-  const { saveFamily, createWallet, saveBudget } = useFamilyStore();
   const showToast = useToast();
 
   const [step, setStep] = useState(1);
@@ -265,33 +263,46 @@ export default function OnboardingPage() {
     };
 
     try {
-      // 1. Save family document (includes members & defaultWalletId)
-      await saveFamily(familyData);
+      // Use a batch so all writes succeed or all fail atomically.
+      // Prevents the broken state where family doc exists but wallets/budgets are missing.
+      const batch = writeBatch(db);
+      const now = new Date();
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
-      // 2. Save all configured wallets
+      // 1. Family document
+      batch.set(doc(db, 'families', user.uid), familyData);
+
+      // 2. Wallets
       for (const w of walletsSetup) {
-        await createWallet(user.uid, {
-          ...w,
-          includeInBalance: w.includeInBalance !== false
-        });
+        batch.set(
+          doc(collection(db, 'families', user.uid, 'wallets'), w.walletId),
+          { ...w, includeInBalance: w.includeInBalance !== false, createdAt: now }
+        );
       }
 
-      // 3. Save all checked budgets
+      // 3. Active budgets
       for (const b of budgetsSetup) {
         if (b.active) {
-          await saveBudget(user.uid, {
-            budgetId: 'budget_' + b.category.replace(/\s+/g, '').replace(/\//g, ''),
-            category: b.category,
-            limitAmount: b.limitAmount,
-            spentAmount: 0,
-            period: 'monthly',
-            startDate: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
-            endDate: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0, 23, 59, 59),
-            alertThreshold: 0.8,
-            isAlerted: false
-          });
+          const budgetId = 'budget_' + b.category.replace(/\s+/g, '').replace(/\//g, '');
+          batch.set(
+            doc(db, 'families', user.uid, 'budgets', budgetId),
+            {
+              budgetId,
+              category: b.category,
+              limitAmount: b.limitAmount,
+              spentAmount: 0,
+              period: 'monthly',
+              startDate: monthStart,
+              endDate: monthEnd,
+              alertThreshold: 0.8,
+              isAlerted: false
+            }
+          );
         }
       }
+
+      await batch.commit();
     } catch (err) {
       console.error("Error saving onboarding details: ", err);
       showToast("Đã xảy ra lỗi khi lưu, vui lòng thử lại!", "error");
