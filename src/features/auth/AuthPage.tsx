@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { auth } from '../../firebase';
-import { Heart, Lock, Mail } from 'lucide-react';
+import { Lock, Mail } from 'lucide-react';
+import AppLogo from '../../components/AppLogo';
 
 export default function AuthPage() {
   const [isRegister, setIsRegister] = useState(false);
@@ -53,19 +54,8 @@ export default function AuthPage() {
   return (
     <div className="scrollable" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', height: '100%' }}>
       <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-        <div style={{
-          width: '80px',
-          height: '80px',
-          borderRadius: '24px',
-          backgroundColor: 'var(--primary-bg)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          margin: '0 auto 16px',
-          color: 'var(--primary)',
-          boxShadow: 'var(--shadow-sm)'
-        }}>
-          <Heart size={40} fill="currentColor" />
+        <div style={{ margin: '0 auto 16px', width: '80px', borderRadius: '20px', overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}>
+          <AppLogo size={80} />
         </div>
         <h1 style={{ color: 'var(--text-primary)', marginBottom: '8px', fontSize: '26px' }}>SmartHomeMom</h1>
         <p style={{ color: 'var(--text-secondary)' }}>Quản lý chi tiêu & thực đơn dinh dưỡng gia đình</p>

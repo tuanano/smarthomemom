@@ -12,6 +12,7 @@ import SettingsPage from './features/settings/SettingsPage';
 import TransactionModal from './features/budget/TransactionModal';
 import PWAInstallPrompt from './components/PWAInstallPrompt';
 import { Wallet, ChefHat, ShoppingBasket, Loader2, Settings, Plus } from 'lucide-react';
+import AppLogo from './components/AppLogo';
 
 export default function App() {
   const { user, loading, setUser, setLoading } = useAuthStore();
@@ -89,7 +90,10 @@ export default function App() {
         backgroundColor: 'var(--bg-cream)',
         gap: '16px'
       }}>
-        <Loader2 size={36} className="spin" style={{ color: 'var(--primary)' }} />
+        <div style={{ borderRadius: '20px', overflow: 'hidden', boxShadow: '0 4px 16px rgba(255,140,105,0.3)' }}>
+          <AppLogo size={72} />
+        </div>
+        <Loader2 size={24} className="spin" style={{ color: 'var(--primary)' }} />
         <p style={{ fontWeight: 600 }}>Đang chuẩn bị dữ liệu...</p>
       </div>
     );

@@ -10,6 +10,7 @@ import { signOut, updateProfile, updatePassword, reauthenticateWithCredential, E
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../../firebase';
 import { getMergedCategories, ICON_MAP } from '../../core/constants';
+import AppLogo from '../../components/AppLogo';
 
 const ICON_OPTIONS: { name: string; label: string }[] = [
   { name: 'Utensils', label: 'Ăn uống' },
@@ -2765,14 +2766,8 @@ export default function SettingsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {/* App identity */}
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '28px 20px 20px', textAlign: 'center' }}>
-            <div style={{
-              width: '80px', height: '80px', borderRadius: '24px',
-              background: 'linear-gradient(135deg, var(--primary) 0%, #F15BB5 100%)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '36px', marginBottom: '14px',
-              boxShadow: '0 8px 24px rgba(255,140,105,0.4)'
-            }}>
-              🏠
+            <div style={{ marginBottom: '14px', borderRadius: '20px', overflow: 'hidden', boxShadow: '0 8px 24px rgba(255,140,105,0.4)' }}>
+              <AppLogo size={80} />
             </div>
             <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '4px' }}>SmartHomeMom</div>
             <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '10px' }}>Quản lý chi tiêu gia đình thông minh</div>
