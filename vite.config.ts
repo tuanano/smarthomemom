@@ -13,7 +13,11 @@ export default defineConfig({
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'maskable-icon.png'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
-        navigateFallback: null,
+        navigateFallback: 'index.html',
+        navigateFallbackDenylist: [/^\/api\//],
+        cleanupOutdatedCaches: true,
+        skipWaiting: true,
+        clientsClaim: true,
       },
       manifest: {
         name: "SmartHomeMom - Chi Tiêu & Thực Đơn Gia Đình",

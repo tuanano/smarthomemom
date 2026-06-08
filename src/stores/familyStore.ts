@@ -92,12 +92,8 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     set({ familyLoading: true });
     return onSnapshot(
       doc(db, 'families', familyId),
-      { includeMetadataChanges: true },
       (docSnap) => {
         if (!docSnap.exists()) {
-          // On a new device, persistentLocalCache fires from cold cache with exists=false
-          // before the server responds. Wait for server confirmation before showing onboarding.
-          if (docSnap.metadata.fromCache) return;
           set({
             family: null,
             customCategories: [],
