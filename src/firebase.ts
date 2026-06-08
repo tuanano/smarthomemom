@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { initializeAuth, indexedDBLocalPersistence } from 'firebase/auth';
 import { initializeFirestore, persistentLocalCache } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
@@ -14,7 +14,11 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
+// indexedDBLocalPersistence: OAuth state stored in IndexedDB, not sessionStorage.
+// Fixes "missing initial state" error in PWA standalone mode (iOS/Android).
+const auth = initializeAuth(app, {
+  persistence: indexedDBLocalPersistence
+});
 const db = initializeFirestore(app, {
   localCache: persistentLocalCache()
 });

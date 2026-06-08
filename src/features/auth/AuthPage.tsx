@@ -1,6 +1,11 @@
-import React, { useState } from 'react';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import React, { useState, useEffect } from 'react';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult } from 'firebase/auth';
 import { auth } from '../../firebase';
+
+// iOS PWA standalone mode does not support popups — must use redirect flow
+const isIOSStandalone = typeof window !== 'undefined' &&
+  'standalone' in window.navigator &&
+  (window.navigator as any).standalone === true;
 import { Lock, Mail } from 'lucide-react';
 import AppLogo from '../../components/AppLogo';
 
@@ -35,11 +40,26 @@ export default function AuthPage() {
     }
   };
 
+  // On iOS PWA, after signInWithRedirect returns the user to the app,
+  // getRedirectResult() must be called to complete the auth flow.
+  useEffect(() => {
+    getRedirectResult(auth).catch((err: any) => {
+      if (err?.code && err.code !== 'auth/popup-closed-by-user') {
+        setError('Đăng nhập Google thất bại. Vui lòng thử lại.');
+      }
+    });
+  }, []);
+
   const handleGoogleLogin = async () => {
     setError('');
     setLoading(true);
+    const provider = new GoogleAuthProvider();
     try {
-      const provider = new GoogleAuthProvider();
+      if (isIOSStandalone) {
+        // Redirect flow: navigates away from app, result handled by getRedirectResult on next mount
+        await signInWithRedirect(auth, provider);
+        return;
+      }
       await signInWithPopup(auth, provider);
     } catch (err: any) {
       console.error(err);
