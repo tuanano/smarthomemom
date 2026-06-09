@@ -23,6 +23,7 @@ export default function DashboardPage() {
     budgets,
     deleteTransaction,
     saveBudget,
+    saveFamily,
     customCategories,
     deleteWallet,
     updateWallet
@@ -42,7 +43,7 @@ export default function DashboardPage() {
   const [newBudgetCategory, setNewBudgetCategory] = useState('Đi chợ / Ăn uống');
   const [newBudgetLimit, setNewBudgetLimit] = useState(5000000);
   const [showAddBudget, setShowAddBudget] = useState(false);
-  const [view, setView] = useState<'main' | 'history' | 'wallet_detail' | 'budget_detail'>('main');
+  const [view, setView] = useState<'main' | 'history' | 'wallet_detail' | 'budget_detail' | 'balance_overview'>('main');
   const [selectedWalletIdForDetail, setSelectedWalletIdForDetail] = useState<string | null>(null);
   const [selectedBudgetForDetail, setSelectedBudgetForDetail] = useState<typeof budgets[0] | null>(null);
   const [walletPeriod, setWalletPeriod] = useState<'month' | 30 | 90 | 365 | 'custom'>('month');
@@ -52,6 +53,9 @@ export default function DashboardPage() {
   const [editingWallet, setEditingWallet] = useState(false);
   const [editWalletName, setEditWalletName] = useState('');
   const [editWalletColor, setEditWalletColor] = useState('');
+  const [editWalletBalance, setEditWalletBalance] = useState(0);
+  const [editWalletIncludeInBalance, setEditWalletIncludeInBalance] = useState(true);
+  const [editWalletIsDefault, setEditWalletIsDefault] = useState(false);
   const [modalDefaultType, setModalDefaultType] = useState<'income' | 'expense' | 'transfer' | undefined>(undefined);
 
   const [showBalance, setShowBalance] = useState(() => {
@@ -87,6 +91,11 @@ export default function DashboardPage() {
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     })
     .reduce((sum, t) => sum + t.amount, 0);
+
+  const spendingWallets = wallets.filter(w => w.includeInBalance !== false);
+  const savingsWallets = wallets.filter(w => w.includeInBalance === false);
+  const totalAssets = wallets.reduce((sum, w) => sum + w.balance, 0);
+  const totalSavings = savingsWallets.reduce((sum, w) => sum + w.balance, 0);
 
   // Dynamic budget calculation based on current transactions of the month
   const getCategorySpent = (categoryName: string, startDate?: Date, endDate?: Date) => {
@@ -533,28 +542,39 @@ export default function DashboardPage() {
             )}
 
             {/* Balance Widget Card */}
-            <div className="card" style={{
-              background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)',
-              color: 'white',
-              border: 'none',
-              position: 'relative',
-              overflow: 'hidden'
-            }}>
+            <div
+              className="card"
+              onClick={() => setView('balance_overview')}
+              style={{
+                background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%)',
+                color: 'white',
+                border: 'none',
+                position: 'relative',
+                overflow: 'hidden',
+                cursor: 'pointer'
+              }}
+            >
               <div style={{ opacity: 0.1, position: 'absolute', right: '-20px', bottom: '-20px' }}>
                 <WalletIcon size={120} />
               </div>
-              
+
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ fontSize: '13px', fontWeight: 600, opacity: 0.9 }}>Tổng số dư khả dụng</div>
-                <button
-                  onClick={() => setShowBalance(v => {
-                    localStorage.setItem('showBalance', String(!v));
-                    return !v;
-                  })}
-                  style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.8)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
-                >
-                  {showBalance ? <Eye size={16} /> : <EyeOff size={16} />}
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <button
+                    onClick={e => {
+                      e.stopPropagation();
+                      setShowBalance(v => {
+                        localStorage.setItem('showBalance', String(!v));
+                        return !v;
+                      });
+                    }}
+                    style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.8)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                  >
+                    {showBalance ? <Eye size={16} /> : <EyeOff size={16} />}
+                  </button>
+                  <ChevronRight size={16} style={{ opacity: 0.7 }} />
+                </div>
               </div>
               <div style={{ fontSize: '28px', fontWeight: 800, margin: '8px 0 16px', letterSpacing: showBalance ? 'normal' : '4px' }}>
                 {showBalance ? `${totalBalance.toLocaleString('vi-VN')} đ` : '••••••'}
@@ -578,7 +598,7 @@ export default function DashboardPage() {
 
             {/* Wallets detail */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-              {wallets.map(w => {
+              {wallets.filter(w => w.includeInBalance !== false).map(w => {
                 const WalIcon = w.type === 'cash' ? Coins : w.type === 'bank' ? CreditCard : PiggyBank;
                 const isSaving = w.includeInBalance === false;
                 return (
@@ -962,6 +982,9 @@ export default function DashboardPage() {
                         } else {
                           setEditWalletName(selectedWallet.name);
                           setEditWalletColor(selectedWallet.colorCode);
+                          setEditWalletBalance(selectedWallet.balance);
+                          setEditWalletIncludeInBalance(selectedWallet.includeInBalance !== false);
+                          setEditWalletIsDefault(family?.defaultWalletId === selectedWallet.walletId);
                           setEditingWallet(true);
                         }
                       }}
@@ -995,6 +1018,14 @@ export default function DashboardPage() {
                         style={{ height: '40px', fontSize: '14px' }}
                       />
                     </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={{ fontSize: '13px' }}>Số dư (VND)</label>
+                      <CurrencyInput
+                        className="form-control"
+                        value={editWalletBalance}
+                        onChange={setEditWalletBalance}
+                      />
+                    </div>
                     <div>
                       <label style={{ fontSize: '13px', color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>Màu ví</label>
                       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
@@ -1008,13 +1039,73 @@ export default function DashboardPage() {
                         ))}
                       </div>
                     </div>
+                    {/* Toggle ví mặc định */}
+                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '4px 0' }}>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 700 }}>Ví mặc định</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          {editWalletIsDefault ? 'Tự động chọn khi thêm giao dịch mới' : 'Nhấn để đặt làm ví mặc định'}
+                        </div>
+                      </div>
+                      <div
+                        onClick={() => setEditWalletIsDefault(v => !v)}
+                        style={{
+                          width: '44px', height: '24px', borderRadius: '12px', flexShrink: 0,
+                          backgroundColor: editWalletIsDefault ? 'var(--primary)' : 'var(--bg-grey)',
+                          position: 'relative', transition: 'background-color 0.2s', cursor: 'pointer'
+                        }}
+                      >
+                        <div style={{
+                          position: 'absolute', top: '3px',
+                          left: editWalletIsDefault ? '23px' : '3px',
+                          width: '18px', height: '18px', borderRadius: '50%',
+                          backgroundColor: 'white', transition: 'left 0.2s',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                        }} />
+                      </div>
+                    </label>
+                    {/* Toggle ví chi tiêu */}
+                    <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '4px 0' }}>
+                      <div>
+                        <div style={{ fontSize: '13px', fontWeight: 700 }}>Ví chi tiêu</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          {editWalletIncludeInBalance ? 'Tính vào tổng số dư, chi tiêu bình thường' : 'Ẩn khỏi tổng, chỉ thu/chuyển tiền'}
+                        </div>
+                      </div>
+                      <div
+                        onClick={() => setEditWalletIncludeInBalance(v => !v)}
+                        style={{
+                          width: '44px', height: '24px', borderRadius: '12px', flexShrink: 0,
+                          backgroundColor: editWalletIncludeInBalance ? 'var(--secondary)' : 'var(--bg-grey)',
+                          position: 'relative', transition: 'background-color 0.2s', cursor: 'pointer'
+                        }}
+                      >
+                        <div style={{
+                          position: 'absolute', top: '3px',
+                          left: editWalletIncludeInBalance ? '23px' : '3px',
+                          width: '18px', height: '18px', borderRadius: '50%',
+                          backgroundColor: 'white', transition: 'left 0.2s',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                        }} />
+                      </div>
+                    </label>
                     <button
                       type="button"
                       className="btn btn-primary"
                       style={{ height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                       onClick={async () => {
-                        if (!user || !editWalletName.trim()) return;
-                        await updateWallet(user.uid, selectedWallet.walletId, { name: editWalletName.trim(), colorCode: editWalletColor });
+                        if (!user || !editWalletName.trim() || !family) return;
+                        await updateWallet(user.uid, selectedWallet.walletId, {
+                          name: editWalletName.trim(),
+                          colorCode: editWalletColor,
+                          balance: editWalletBalance,
+                          includeInBalance: editWalletIncludeInBalance,
+                        });
+                        if (editWalletIsDefault && family.defaultWalletId !== selectedWallet.walletId) {
+                          await saveFamily({ ...family, defaultWalletId: selectedWallet.walletId });
+                        } else if (!editWalletIsDefault && family.defaultWalletId === selectedWallet.walletId) {
+                          await saveFamily({ ...family, defaultWalletId: undefined });
+                        }
                         setEditingWallet(false);
                       }}
                     >
@@ -1168,6 +1259,249 @@ export default function DashboardPage() {
                     })
                   )}
                 </div>
+              </div>
+            );
+          })()
+        ) : view === 'balance_overview' ? (
+          /* ── Balance Overview ── */
+          (() => {
+            const pieData = wallets
+              .filter(w => w.balance > 0)
+              .map(w => ({ name: w.name, value: w.balance, color: w.colorCode, isSaving: w.includeInBalance === false }));
+            const net = totalIncome - totalExpense;
+
+            return (
+              <div style={{ paddingBottom: '24px' }}>
+                {/* Top bar */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setView('main')}
+                    style={{ background: 'none', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '6px', borderRadius: '50%', backgroundColor: 'var(--bg-grey)', width: '36px', height: '36px', flexShrink: 0 }}
+                  >
+                    <ArrowLeft size={18} />
+                  </button>
+                  <h2 style={{ fontSize: '18px', fontWeight: 800 }}>Tổng quan tài sản</h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowBalance(v => { localStorage.setItem('showBalance', String(!v)); return !v; })}
+                    style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' }}
+                  >
+                    {showBalance ? <Eye size={18} /> : <EyeOff size={18} />}
+                  </button>
+                </div>
+
+                {/* Hero card — tổng tài sản */}
+                <div style={{
+                  borderRadius: '20px',
+                  background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
+                  color: 'white',
+                  padding: '24px 20px',
+                  marginBottom: '16px',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}>
+                  <div style={{ opacity: 0.06, position: 'absolute', right: '-16px', bottom: '-16px' }}>
+                    <WalletIcon size={130} />
+                  </div>
+                  <div style={{ fontSize: '12px', opacity: 0.7, marginBottom: '6px', letterSpacing: '0.5px', textTransform: 'uppercase' }}>Tổng tài sản gia đình</div>
+                  <div style={{ fontSize: '32px', fontWeight: 800, letterSpacing: showBalance ? 'normal' : '5px', marginBottom: '20px' }}>
+                    {showBalance ? `${totalAssets.toLocaleString('vi-VN')} đ` : '••••••'}
+                  </div>
+                  <div style={{ display: 'flex', gap: '12px' }}>
+                    <div style={{
+                      flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', padding: '12px'
+                    }}>
+                      <div style={{ fontSize: '10px', opacity: 0.7, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <Coins size={11} /> Ví chi tiêu
+                      </div>
+                      <div style={{ fontSize: '16px', fontWeight: 700 }}>
+                        {showBalance ? `${totalBalance.toLocaleString('vi-VN')}đ` : '••••'}
+                      </div>
+                      <div style={{ fontSize: '10px', opacity: 0.6, marginTop: '2px' }}>
+                        {totalAssets > 0 ? `${Math.round(totalBalance / totalAssets * 100)}%` : '0%'} tổng tài sản
+                      </div>
+                    </div>
+                    <div style={{
+                      flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '12px', padding: '12px'
+                    }}>
+                      <div style={{ fontSize: '10px', opacity: 0.7, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <PiggyBank size={11} /> Ví tiết kiệm
+                      </div>
+                      <div style={{ fontSize: '16px', fontWeight: 700 }}>
+                        {showBalance ? `${totalSavings.toLocaleString('vi-VN')}đ` : '••••'}
+                      </div>
+                      <div style={{ fontSize: '10px', opacity: 0.6, marginTop: '2px' }}>
+                        {totalAssets > 0 ? `${Math.round(totalSavings / totalAssets * 100)}%` : '0%'} tổng tài sản
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tháng này — 3 chỉ số */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px', marginBottom: '20px' }}>
+                  {[
+                    { label: 'Thu tháng này', value: totalIncome, color: 'var(--secondary)', icon: TrendingUp, prefix: '+' },
+                    { label: 'Chi tháng này', value: totalExpense, color: 'var(--danger)', icon: TrendingDown, prefix: '-' },
+                    { label: 'Còn lại', value: Math.abs(net), color: net >= 0 ? 'var(--secondary)' : 'var(--danger)', icon: net >= 0 ? TrendingUp : TrendingDown, prefix: net >= 0 ? '+' : '-' },
+                  ].map(({ label, value, color, icon: Icon, prefix }) => (
+                    <div key={label} className="card" style={{ margin: 0, padding: '12px', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '6px' }}>
+                        <div style={{ width: '32px', height: '32px', borderRadius: '50%', backgroundColor: `${color}18`, color, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Icon size={15} />
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '12px', fontWeight: 800, color, letterSpacing: showBalance ? 'normal' : '2px' }}>
+                        {showBalance ? `${prefix}${value.toLocaleString('vi-VN')}đ` : '••••'}
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '3px', lineHeight: 1.3 }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Biểu đồ phân bổ */}
+                {pieData.length > 0 && (
+                  <div className="card" style={{ marginBottom: '20px' }}>
+                    <h3 style={{ fontSize: '14px', fontWeight: 700, marginBottom: '16px' }}>Phân bổ tài sản</h3>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                      <div style={{ width: '130px', height: '130px', flexShrink: 0 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie data={pieData} dataKey="value" cx="50%" cy="50%" innerRadius={36} outerRadius={58} paddingAngle={2} strokeWidth={0}>
+                              {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                            </Pie>
+                            <Tooltip
+                              formatter={(v: unknown) => [showBalance ? `${Number(v).toLocaleString('vi-VN')}đ` : '••••']}
+                              contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {pieData.map((d) => (
+                          <div key={d.name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div style={{ width: '10px', height: '10px', borderRadius: '3px', backgroundColor: d.color, flexShrink: 0 }} />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.name}</div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>
+                                {totalAssets > 0 ? `${Math.round(d.value / totalAssets * 100)}%` : '0%'}
+                                {d.isSaving && <span style={{ marginLeft: '4px', color: '#71717a', fontWeight: 600 }}>· Tiết kiệm</span>}
+                              </div>
+                            </div>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: showBalance ? 'normal' : '2px', flexShrink: 0 }}>
+                              {showBalance ? `${d.value.toLocaleString('vi-VN')}đ` : '••••'}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Danh sách ví chi tiêu */}
+                <div style={{ marginBottom: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                    <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Ví chi tiêu</h3>
+                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{spendingWallets.length} ví</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {spendingWallets.map(w => {
+                      const WalIcon = w.type === 'cash' ? Coins : w.type === 'bank' ? CreditCard : PiggyBank;
+                      const pct = totalBalance > 0 ? Math.round(w.balance / totalBalance * 100) : 0;
+                      const isDefault = family?.defaultWalletId === w.walletId;
+                      return (
+                        <div
+                          key={w.walletId}
+                          onClick={() => { setSelectedWalletIdForDetail(w.walletId); setView('wallet_detail'); }}
+                          style={{
+                            padding: '14px', borderRadius: '14px', border: '1px solid var(--border)',
+                            borderLeft: `4px solid ${w.colorCode}`, backgroundColor: 'var(--bg-card)', cursor: 'pointer'
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                            <div style={{ width: '38px', height: '38px', borderRadius: '10px', flexShrink: 0, backgroundColor: `${w.colorCode}22`, color: w.colorCode, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <WalIcon size={19} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+                                {isDefault && <span style={{ fontSize: '10px', fontWeight: 700, color: 'var(--primary)', backgroundColor: 'var(--primary-bg)', borderRadius: '4px', padding: '1px 5px', flexShrink: 0 }}>Mặc định</span>}
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>
+                                {w.type === 'cash' ? 'Tiền mặt' : w.type === 'bank' ? 'Thẻ/Ngân hàng' : 'Ví điện tử'}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                              <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-primary)', letterSpacing: showBalance ? 'normal' : '2px' }}>
+                                {showBalance ? `${w.balance.toLocaleString('vi-VN')}đ` : '••••'}
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>{pct}% ví chi tiêu</div>
+                            </div>
+                          </div>
+                          {/* Progress bar */}
+                          <div style={{ height: '4px', borderRadius: '2px', backgroundColor: `${w.colorCode}25`, overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${pct}%`, borderRadius: '2px', backgroundColor: w.colorCode, transition: 'width 0.4s ease' }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {spendingWallets.length === 0 && (
+                      <div style={{ textAlign: 'center', padding: '24px', color: 'var(--text-secondary)', fontSize: '13px' }}>Chưa có ví chi tiêu</div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Danh sách ví tiết kiệm */}
+                {savingsWallets.length > 0 && (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                      <h3 style={{ fontSize: '15px', fontWeight: 700 }}>Ví tiết kiệm</h3>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{savingsWallets.length} ví</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {savingsWallets.map(w => {
+                        const WalIcon = w.type === 'cash' ? Coins : w.type === 'bank' ? CreditCard : PiggyBank;
+                        const pct = totalAssets > 0 ? Math.round(w.balance / totalAssets * 100) : 0;
+                        return (
+                          <div
+                            key={w.walletId}
+                            onClick={() => { setSelectedWalletIdForDetail(w.walletId); setView('wallet_detail'); }}
+                            style={{
+                              padding: '14px', borderRadius: '14px',
+                              border: '1px dashed var(--border)',
+                              borderLeft: `4px solid ${w.colorCode}`,
+                              backgroundColor: 'var(--bg-card)', cursor: 'pointer'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                              <div style={{ width: '38px', height: '38px', borderRadius: '10px', flexShrink: 0, backgroundColor: `${w.colorCode}22`, color: w.colorCode, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <WalIcon size={19} />
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <span style={{ fontWeight: 700, fontSize: '14px', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+                                  <span style={{ fontSize: '10px', fontWeight: 700, color: '#71717a', backgroundColor: '#f4f4f5', borderRadius: '4px', padding: '1px 5px', flexShrink: 0 }}>Tiết kiệm</span>
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>
+                                  {w.type === 'cash' ? 'Tiền mặt' : w.type === 'bank' ? 'Thẻ/Ngân hàng' : 'Ví điện tử'} · Không tính vào chi tiêu
+                                </div>
+                              </div>
+                              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-primary)', letterSpacing: showBalance ? 'normal' : '2px' }}>
+                                  {showBalance ? `${w.balance.toLocaleString('vi-VN')}đ` : '••••'}
+                                </div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '1px' }}>{pct}% tổng tài sản</div>
+                              </div>
+                            </div>
+                            <div style={{ height: '4px', borderRadius: '2px', backgroundColor: `${w.colorCode}25`, overflow: 'hidden' }}>
+                              <div style={{ height: '100%', width: `${pct}%`, borderRadius: '2px', backgroundColor: w.colorCode, transition: 'width 0.4s ease' }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })()
