@@ -1,22 +1,26 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { onAuthStateChanged, getRedirectResult } from 'firebase/auth';
 import { auth } from './firebase';
 import { useAuthStore } from './stores/authStore';
 import { useFamilyStore } from './stores/familyStore';
 import AuthPage from './features/auth/AuthPage';
 import OnboardingPage from './features/auth/OnboardingPage';
-import DashboardPage from './features/dashboard/DashboardPage';
-import MenuPage from './features/menu/MenuPage';
-import LocalPantry from './features/menu/LocalPantry';
-import SettingsPage from './features/settings/SettingsPage';
-import TransactionModal from './features/budget/TransactionModal';
+
+const DashboardPage = lazy(() => import('./features/dashboard/DashboardPage'));
+const MenuPage = lazy(() => import('./features/menu/MenuPage'));
+const LocalPantry = lazy(() => import('./features/menu/LocalPantry'));
+const SettingsPage = lazy(() => import('./features/settings/SettingsPage'));
+const TransactionModal = lazy(() => import('./features/budget/TransactionModal'));
 import PWAInstallPrompt from './components/PWAInstallPrompt';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { useToast } from './components/Toast';
 import { Wallet, ChefHat, ShoppingBasket, Loader2, Settings, Plus } from 'lucide-react';
 import AppLogo from './components/AppLogo';
 import { useReminderService } from './hooks/useReminderService';
 
 export default function App() {
   useReminderService();
+  const showToast = useToast();
   const { user, loading, setUser, setLoading, setRedirectError } = useAuthStore();
   const {
     family,
@@ -34,6 +38,8 @@ export default function App() {
     setCustomCategories,
     setCustomIngredients,
     setFavoriteMenus,
+    subscriptionError,
+    clearSubscriptionError,
   } = useFamilyStore();
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'menu' | 'pantry' | 'settings'>('dashboard');
@@ -87,6 +93,14 @@ export default function App() {
       unsubAuth?.();
     };
   }, []);
+
+  // Surface Firestore subscription errors as toast (H6)
+  useEffect(() => {
+    if (subscriptionError) {
+      showToast(subscriptionError, 'error');
+      clearSubscriptionError();
+    }
+  }, [subscriptionError]);
 
   // Firestore Subscriptions when user logged in
   useEffect(() => {
@@ -143,10 +157,12 @@ export default function App() {
     <>
       {/* Main Content Area — full height, no header */}
       <main style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-        {activeTab === 'dashboard' && <DashboardPage />}
-        {activeTab === 'menu' && <MenuPage />}
-        {activeTab === 'pantry' && <LocalPantry />}
-        {activeTab === 'settings' && <SettingsPage />}
+        <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Loader2 size={24} className="spin" style={{ color: 'var(--primary)' }} /></div>}>
+          {activeTab === 'dashboard' && <ErrorBoundary><DashboardPage /></ErrorBoundary>}
+          {activeTab === 'menu' && <ErrorBoundary><MenuPage /></ErrorBoundary>}
+          {activeTab === 'pantry' && <ErrorBoundary><LocalPantry /></ErrorBoundary>}
+          {activeTab === 'settings' && <ErrorBoundary><SettingsPage /></ErrorBoundary>}
+        </Suspense>
       </main>
 
       {/* Bottom Navigation with center FAB */}
@@ -205,10 +221,12 @@ export default function App() {
       </nav>
 
       {/* Global add-transaction modal (triggered from bottom nav +) */}
-      <TransactionModal
-        isOpen={addModalOpen}
-        onClose={() => setAddModalOpen(false)}
-      />
+      <Suspense fallback={null}>
+        <TransactionModal
+          isOpen={addModalOpen}
+          onClose={() => setAddModalOpen(false)}
+        />
+      </Suspense>
 
       {/* PWA install prompt — Android banner or iOS instructions */}
       <PWAInstallPrompt />

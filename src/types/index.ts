@@ -1,3 +1,13 @@
+import type { Timestamp } from 'firebase/firestore';
+
+/** Timestamp hoặc Date — dùng hàm toDate() để convert an toàn */
+export type FirestoreDate = Timestamp | Date;
+
+/** Convert FirestoreDate → JS Date an toàn */
+export function toDate(val: FirestoreDate): Date {
+  return val instanceof Date ? val : val.toDate();
+}
+
 export interface FamilyMember {
   id: string;
   name: string;
@@ -11,8 +21,8 @@ export interface FamilyMember {
 export interface Family {
   familyId: string;
   familyName: string;
-  createdAt: any;
-  updatedAt: any;
+  createdAt: FirestoreDate;
+  updatedAt: FirestoreDate;
   members: FamilyMember[];
   nutritionTargets: {
     calories: number;
@@ -34,7 +44,7 @@ export interface Wallet {
   balance: number;
   colorCode: string;
   iconName: string;
-  createdAt: any;
+  createdAt: FirestoreDate;
   // false = ví lưu trữ: không tính vào tổng số dư, không chi được, chỉ thu/chuyển tiền
   includeInBalance?: boolean;
 }
@@ -46,8 +56,8 @@ export interface Transaction {
   amount: number;
   category: string;
   note: string;
-  date: any; // Firestore Timestamp
-  createdAt: any;
+  date: FirestoreDate;
+  createdAt: FirestoreDate;
   imageUrl?: string;
   toWalletId?: string;
   spentBy?: string;
@@ -59,8 +69,8 @@ export interface Budget {
   limitAmount: number;
   spentAmount: number;
   period: 'monthly' | 'weekly';
-  startDate: any;
-  endDate: any;
+  startDate: FirestoreDate;
+  endDate: FirestoreDate;
   alertThreshold: number;
   isAlerted: boolean;
 }
@@ -73,8 +83,8 @@ export interface MealItem {
 
 export interface WeeklyMenu {
   menuId: string; // yyyy_wWW
-  startDate: any;
-  endDate: any;
+  startDate: FirestoreDate;
+  endDate: FirestoreDate;
   meals: {
     [dateString: string]: {
       breakfast: MealItem[];

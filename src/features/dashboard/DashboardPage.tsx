@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import CurrencyInput from '../../components/CurrencyInput';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useFamilyStore } from '../../stores/familyStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useNotificationStore } from '../../stores/notificationStore';
+import { toDate } from '../../types';
 import type { Budget, Transaction } from '../../types';
 import { getMergedCategories } from '../../core/constants';
+import { safeLocalStorage } from '../../core/storage';
 import { Wallet as WalletIcon, TrendingDown, TrendingUp, AlertTriangle, Trash2, PiggyBank, Coins, CreditCard, ArrowRightLeft, ChevronRight, ArrowLeft, HelpCircle, Eye, EyeOff, Plus, Minus, Pencil, X, Check } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 import { format } from 'date-fns';
@@ -29,7 +31,7 @@ export default function DashboardPage() {
     updateWallet
   } = useFamilyStore();
 
-  const mergedCategories = getMergedCategories(customCategories);
+  const mergedCategories = useMemo(() => getMergedCategories(customCategories), [customCategories]);
 
   const { banners, dismissBanner } = useNotificationStore();
 
@@ -59,7 +61,7 @@ export default function DashboardPage() {
   const [modalDefaultType, setModalDefaultType] = useState<'income' | 'expense' | 'transfer' | undefined>(undefined);
 
   const [showBalance, setShowBalance] = useState(() => {
-    return localStorage.getItem('showBalance') !== 'false';
+    return safeLocalStorage.getItem('showBalance') !== 'false';
   });
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
@@ -76,21 +78,23 @@ export default function DashboardPage() {
     .filter(w => w.includeInBalance !== false)
     .reduce((sum, w) => sum + w.balance, 0);
 
-  const totalIncome = transactions
+  const totalIncome = useMemo(() => transactions
     .filter(t => {
       if (t.type !== 'income') return false;
-      const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      const d = toDate(t.date);
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     })
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => sum + t.amount, 0),
+  [transactions, currentMonth, currentYear]);
 
-  const totalExpense = transactions
+  const totalExpense = useMemo(() => transactions
     .filter(t => {
       if (t.type !== 'expense') return false;
-      const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      const d = toDate(t.date);
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     })
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => sum + t.amount, 0),
+  [transactions, currentMonth, currentYear]);
 
   const spendingWallets = wallets.filter(w => w.includeInBalance !== false);
   const savingsWallets = wallets.filter(w => w.includeInBalance === false);
@@ -98,21 +102,21 @@ export default function DashboardPage() {
   const totalSavings = savingsWallets.reduce((sum, w) => sum + w.balance, 0);
 
   // Dynamic budget calculation based on current transactions of the month
-  const getCategorySpent = (categoryName: string, startDate?: Date, endDate?: Date) => {
+  const getCategorySpent = useCallback((categoryName: string, startDate?: Date, endDate?: Date) => {
     return transactions
       .filter(t => {
         if (t.type !== 'expense' || t.category !== categoryName) return false;
         if (startDate || endDate) {
-          const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+          const d = toDate(t.date);
           if (startDate && d < startDate) return false;
           if (endDate && d > endDate) return false;
         }
         return true;
       })
       .reduce((sum, t) => sum + t.amount, 0);
-  };
+  }, [transactions]);
 
-  const handleAddBudget = async () => {
+  const handleAddBudget = useCallback(async () => {
     if (!user) return;
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
@@ -129,10 +133,10 @@ export default function DashboardPage() {
     };
     await saveBudget(user.uid, newB);
     setShowAddBudget(false);
-  };
+  }, [user, newBudgetCategory, newBudgetLimit, saveBudget, now]);
 
 
-  const handleDeleteTx = async (tx: Transaction) => {
+  const handleDeleteTx = useCallback(async (tx: Transaction) => {
     if (!user) return;
     const yes = await confirm({
       title: 'Xóa giao dịch',
@@ -143,20 +147,20 @@ export default function DashboardPage() {
     if (yes) {
       await deleteTransaction(user.uid, tx);
     }
-  };
+  }, [user, confirm, deleteTransaction]);
 
-  const filteredTransactions = transactions.filter(t => {
-    const matchesSearch = 
+  const filteredTransactions = useMemo(() => transactions.filter(t => {
+    const matchesSearch =
       t.note.toLowerCase().includes(searchTerm.toLowerCase()) ||
       t.category.toLowerCase().includes(searchTerm.toLowerCase());
-      
+
     if (!matchesSearch) return false;
-    
+
     if (dateFilter === 'all') return true;
-    
-    const txDate = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+
+    const txDate = toDate(t.date);
     const now = new Date();
-    
+
     if (dateFilter === 'today') {
       return (
         txDate.getDate() === now.getDate() &&
@@ -164,13 +168,13 @@ export default function DashboardPage() {
         txDate.getFullYear() === now.getFullYear()
       );
     }
-    
+
     if (dateFilter === 'week') {
       const oneWeekAgo = new Date();
       oneWeekAgo.setDate(now.getDate() - 7);
       return txDate >= oneWeekAgo;
     }
-    
+
     if (dateFilter === 'month') {
       return (
         txDate.getMonth() === now.getMonth() &&
@@ -193,12 +197,12 @@ export default function DashboardPage() {
     }
 
     return true;
-  });
+  }), [transactions, searchTerm, dateFilter, dateFrom, dateTo]);
 
   const sortedFilteredTransactions = useMemo(() => {
     return [...filteredTransactions].sort((a, b) => {
-      const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
-      const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+      const dateA = toDate(a.date);
+      const dateB = toDate(b.date);
       return dateB.getTime() - dateA.getTime();
     });
   }, [filteredTransactions]);
@@ -208,25 +212,26 @@ export default function DashboardPage() {
   };
 
   // Chart Data preparation — chỉ chi tiêu tháng hiện tại
-  const categorySummary: { [key: string]: number } = {};
-  transactions
-    .filter(t => {
-      if (t.type !== 'expense') return false;
-      const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    })
-    .forEach(t => {
-      categorySummary[t.category] = (categorySummary[t.category] || 0) + t.amount;
+  const chartData = useMemo(() => {
+    const categorySummary: { [key: string]: number } = {};
+    transactions
+      .filter(t => {
+        if (t.type !== 'expense') return false;
+        const d = toDate(t.date);
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      })
+      .forEach(t => {
+        categorySummary[t.category] = (categorySummary[t.category] || 0) + t.amount;
+      });
+    return Object.keys(categorySummary).map(catName => {
+      const catMeta = mergedCategories.find(c => c.name === catName);
+      return {
+        name: catName.split('/')[0].trim(),
+        value: categorySummary[catName],
+        color: catMeta?.color || '#FF8C69'
+      };
     });
-
-  const chartData = Object.keys(categorySummary).map(catName => {
-    const catMeta = mergedCategories.find(c => c.name === catName);
-    return {
-      name: catName.split('/')[0].trim(),
-      value: categorySummary[catName],
-      color: catMeta?.color || '#FF8C69'
-    };
-  });
+  }, [transactions, currentMonth, currentYear, mergedCategories]);
 
   const selectedWallet = wallets.find(w => w.walletId === selectedWalletIdForDetail);
   
@@ -234,7 +239,7 @@ export default function DashboardPage() {
     if (!selectedWalletIdForDetail) return [];
     const now = new Date();
     return transactions.filter(t => {
-      const txDate = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      const txDate = toDate(t.date);
       let isWithinPeriod: boolean;
       if (walletPeriod === 'month') {
         isWithinPeriod = txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
@@ -278,8 +283,8 @@ export default function DashboardPage() {
     const allWalletTransactionsSorted = [...transactions]
       .filter(t => t.walletId === selectedWalletIdForDetail || t.toWalletId === selectedWalletIdForDetail)
       .sort((a, b) => {
-        const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
-        const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+        const dateA = toDate(a.date);
+        const dateB = toDate(b.date);
         return dateB.getTime() - dateA.getTime(); // newest first
       });
 
@@ -308,14 +313,14 @@ export default function DashboardPage() {
   // Group transactions by date for selected wallet
   const groupedWalletTransactions = useMemo(() => {
     const sorted = [...filteredWalletTransactions].sort((a, b) => {
-      const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
-      const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+      const dateA = toDate(a.date);
+      const dateB = toDate(b.date);
       return dateB.getTime() - dateA.getTime();
     });
 
     const groups: { [dateStr: string]: Transaction[] } = {};
     sorted.forEach(t => {
-      const date = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      const date = toDate(t.date);
       const dateStr = format(date, 'yyyy-MM-dd');
       groups[dateStr] = groups[dateStr] || [];
       groups[dateStr].push(t);
@@ -389,7 +394,7 @@ export default function DashboardPage() {
       }
     }
 
-    const date = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+    const date = toDate(t.date);
     const formattedDate = format(date, 'dd/MM/yyyy');
 
     let subtitleParts = [];
@@ -565,7 +570,7 @@ export default function DashboardPage() {
                     onClick={e => {
                       e.stopPropagation();
                       setShowBalance(v => {
-                        localStorage.setItem('showBalance', String(!v));
+                        safeLocalStorage.setItem('showBalance', String(!v));
                         return !v;
                       });
                     }}
@@ -710,8 +715,8 @@ export default function DashboardPage() {
                   bStart = new Date(now.getFullYear(), now.getMonth(), 1);
                   bEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
                 } else {
-                  bStart = b.startDate?.toDate ? b.startDate.toDate() : new Date(b.startDate);
-                  bEnd = b.endDate?.toDate ? b.endDate.toDate() : new Date(b.endDate);
+                  bStart = toDate(b.startDate);
+                  bEnd = toDate(b.endDate);
                 }
                 const spent = getCategorySpent(b.category, bStart, bEnd);
                 const ratio = b.limitAmount > 0 ? spent / b.limitAmount : 0;
@@ -1284,7 +1289,7 @@ export default function DashboardPage() {
                   <h2 style={{ fontSize: '18px', fontWeight: 800 }}>Tổng quan tài sản</h2>
                   <button
                     type="button"
-                    onClick={() => setShowBalance(v => { localStorage.setItem('showBalance', String(!v)); return !v; })}
+                    onClick={() => setShowBalance(v => { safeLocalStorage.setItem('showBalance', String(!v)); return !v; })}
                     style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '6px', display: 'flex', alignItems: 'center' }}
                   >
                     {showBalance ? <Eye size={18} /> : <EyeOff size={18} />}
