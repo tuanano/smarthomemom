@@ -110,6 +110,74 @@ const MOCK_RECIPES: {
   { name: 'Rau luộc chấm tương', type: 'soup', pref: 'chay', calories: 90, cost: 15000, ingredients: ['rau_muong', 'gia_vi'] },
 ];
 
+// ─── Shared fetch helper with retry ──────────────────────────────────────────
+
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
+
+class GeminiClientError extends Error {}
+
+async function callGemini(prompt: string, apiKey: string, jsonMode: boolean): Promise<string> {
+  const url = `${GEMINI_URL}?key=${apiKey}`;
+  const body = JSON.stringify({
+    contents: [{ parts: [{ text: prompt }] }],
+    ...(jsonMode ? { generationConfig: { responseMimeType: 'application/json' } } : {}),
+  });
+
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise<void>(r => setTimeout(r, 1000 * attempt));
+    try {
+      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+      if (!res.ok) {
+        // 4xx = auth / quota / bad request — no point retrying
+        if (res.status >= 400 && res.status < 500) throw new GeminiClientError(`Gemini API ${res.status}`);
+        lastErr = new Error(`Gemini API ${res.status}`);
+        continue; // 5xx — retry
+      }
+      const json = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+      const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!text) throw new Error('Empty Gemini response');
+      return text;
+    } catch (err) {
+      if (err instanceof GeminiClientError) throw err; // no retry on 4xx
+      lastErr = err; // network error or 5xx from above — retry
+    }
+  }
+  throw lastErr ?? new Error('Gemini call failed after retries');
+}
+
+// ─── Response shape guards ────────────────────────────────────────────────────
+
+function isDailyMenuResponse(obj: unknown): obj is DailyMenuResponse {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const o = obj as Record<string, unknown>;
+  const meals = o.meals;
+  if (typeof meals !== 'object' || meals === null) return false;
+  const m = meals as Record<string, unknown>;
+  if (!Array.isArray(m.breakfast) || !Array.isArray(m.lunch) || !Array.isArray(m.dinner)) return false;
+  if (typeof o.totalDayCalories !== 'number') return false;
+  const ns = o.nutritionSummary;
+  if (typeof ns !== 'object' || ns === null) return false;
+  const n = ns as Record<string, unknown>;
+  return typeof n.proteinGrams === 'number' && typeof n.carbsGrams === 'number' && typeof n.fatGrams === 'number';
+}
+
+function isMealOptionArray(obj: unknown): obj is MealOption[] {
+  if (!Array.isArray(obj) || obj.length === 0) return false;
+  return (obj as unknown[]).every(item => {
+    if (typeof item !== 'object' || item === null) return false;
+    const i = item as Record<string, unknown>;
+    return typeof i.recipeName === 'string' && typeof i.calories === 'number' && typeof i.description === 'string';
+  });
+}
+
+function isCalorieEstimate(obj: unknown): obj is CalorieEstimate {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const o = obj as Record<string, unknown>;
+  return typeof o.calories === 'number' && typeof o.proteinGrams === 'number' &&
+    typeof o.carbsGrams === 'number' && typeof o.fatGrams === 'number';
+}
+
 // ─── Existing: generate full day menu ─────────────────────────────────────────
 
 export async function generateDailyMenu(req: SuggestionRequest): Promise<DailyMenuResponse> {
@@ -152,24 +220,12 @@ JSON duy nhất, không markdown:
 `;
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: 'application/json' }
-        })
-      }
-    );
-    if (!response.ok) throw new Error(`AI API ${response.status}`);
-    const json = await response.json();
-    const textResult = json.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!textResult) throw new Error('Empty AI response');
-    return JSON.parse(textResult) as DailyMenuResponse;
+    const text = await callGemini(prompt, apiKey, true);
+    const parsed: unknown = JSON.parse(text);
+    if (!isDailyMenuResponse(parsed)) throw new Error('Invalid daily menu response shape');
+    return parsed;
   } catch (err) {
-    console.error("Gemini API call failed, falling back to mock: ", err);
+    console.error('Gemini generateDailyMenu failed, falling back to mock:', err);
     return generateMockMenu(req);
   }
 }
@@ -216,24 +272,12 @@ JSON array, không markdown:
 `;
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: 'application/json' }
-        })
-      }
-    );
-    if (!response.ok) throw new Error(`AI API ${response.status}`);
-    const json = await response.json();
-    const textResult = json.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!textResult) throw new Error('Empty AI response');
-    return JSON.parse(textResult) as MealOption[];
+    const text = await callGemini(prompt, apiKey, true);
+    const parsed: unknown = JSON.parse(text);
+    if (!isMealOptionArray(parsed)) throw new Error('Invalid meal options response shape');
+    return parsed;
   } catch (err) {
-    console.error("Meal suggestion API failed:", err);
+    console.error('Gemini generateMealSuggestions failed, falling back to mock:', err);
     return generateMockMealSuggestions(req);
   }
 }
@@ -253,24 +297,12 @@ Trả JSON (không markdown):
 `;
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { responseMimeType: 'application/json' }
-        })
-      }
-    );
-    if (!response.ok) throw new Error(`Gemini API ${response.status}`);
-    const json = await response.json();
-    const textResult = json.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!textResult) throw new Error('Empty Gemini response');
-    return JSON.parse(textResult) as CalorieEstimate;
+    const text = await callGemini(prompt, apiKey, true);
+    const parsed: unknown = JSON.parse(text);
+    if (!isCalorieEstimate(parsed)) throw new Error('Invalid calorie estimate response shape');
+    return parsed;
   } catch (err) {
-    console.error("Calorie estimate API failed:", err);
+    console.error('Gemini estimateDishCalories failed, falling back to mock:', err);
     return estimateCaloriesMock(dishName);
   }
 }
@@ -288,21 +320,9 @@ export async function getCookingGuide(dishName: string): Promise<string> {
 Không thêm bất kỳ nội dung nào ngoài format trên.`;
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      }
-    );
-    if (!response.ok) throw new Error(`Gemini API ${response.status}`);
-    const json = await response.json();
-    const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error('Empty Gemini response');
-    return text as string;
+    return await callGemini(prompt, apiKey, false);
   } catch (err) {
-    console.error('Cooking guide API failed:', err);
+    console.error('Gemini getCookingGuide failed, falling back to mock:', err);
     return getCookingGuideMock(dishName);
   }
 }

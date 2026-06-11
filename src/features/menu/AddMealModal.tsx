@@ -110,6 +110,9 @@ export default function AddMealModal({ mealType, familySize, availableIngredient
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="add-meal-title"
       style={{
         position: 'fixed',
         top: 0,
@@ -142,12 +145,13 @@ export default function AddMealModal({ mealType, familySize, availableIngredient
       >
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ fontSize: '16px', fontWeight: 700 }}>
+          <h3 id="add-meal-title" style={{ fontSize: '16px', fontWeight: 700 }}>
             {initialMeal ? 'Sửa món' : 'Thêm món'} — {MEAL_LABEL[mealType]}
           </h3>
           <button
             type="button"
             onClick={onClose}
+            aria-label="Đóng"
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', display: 'flex', padding: '4px' }}
           >
             <X size={20} />

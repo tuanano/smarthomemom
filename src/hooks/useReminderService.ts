@@ -11,6 +11,7 @@ import {
   registerPeriodicSync,
 } from '../utils/swStatusCache';
 import { format } from 'date-fns';
+import { toDate } from '../types';
 
 async function fireNotification(title: string, body: string): Promise<void> {
   if (typeof window === 'undefined') return;
@@ -89,7 +90,7 @@ export function useReminderService() {
     if (!user) return;
     const today = format(new Date(), 'yyyy-MM-dd');
     const hasTransactionsToday = transactions.some((t) => {
-      const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      const d = toDate(t.date);
       return format(d, 'yyyy-MM-dd') === today;
     });
     // Check menu asynchronously (Firestore offline cache keeps this fast)
@@ -135,7 +136,7 @@ export function useReminderService() {
       const spent = transactions
         .filter((t) => {
           if (t.type !== 'expense' || t.category !== budget.category) return false;
-          const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+          const d = toDate(t.date);
           return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
         })
         .reduce((sum, t) => sum + t.amount, 0);
@@ -176,7 +177,7 @@ export function useReminderService() {
     if (expenseReminderEnabled) {
       scheduleAt(expenseReminderHour, expenseReminderMinute, lastExpenseReminderDate, () => {
         const txToday = transactionsRef.current.filter((t) => {
-          const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+          const d = toDate(t.date);
           return format(d, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
         });
         if (txToday.length === 0) {

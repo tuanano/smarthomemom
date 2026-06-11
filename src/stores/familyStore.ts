@@ -29,6 +29,9 @@ interface FamilyState {
   setBudgets: (budgets: Budget[]) => void;
   setAvailableIngredients: (ingredients: string[]) => void;
   
+  subscriptionError: string | null;
+  clearSubscriptionError: () => void;
+
   // Realtime Subscriptions
   subscribeFamily: (familyId: string) => () => void;
   subscribeWallets: (familyId: string) => () => void;
@@ -79,6 +82,9 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   customIngredients: [],
   favoriteMenus: [],
   
+  subscriptionError: null,
+  clearSubscriptionError: () => set({ subscriptionError: null }),
+
   setFamily: (family) => set({ family }),
   setWallets: (wallets) => set({ wallets }),
   setTransactions: (transactions) => set({ transactions }),
@@ -89,10 +95,12 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   setFavoriteMenus: (favoriteMenus) => set({ favoriteMenus }),
   
   subscribeFamily: (familyId) => {
+    let active = true;
     set({ familyLoading: true });
-    return onSnapshot(
+    const unsub = onSnapshot(
       doc(db, 'families', familyId),
       (docSnap) => {
+        if (!active) return;
         if (!docSnap.exists()) {
           set({
             family: null,
@@ -123,49 +131,81 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
         });
       },
       (error) => {
+        if (!active) return;
         console.error('[subscribeFamily] Firestore error:', error);
-        set({ familyLoading: false });
+        set({ familyLoading: false, subscriptionError: 'Không thể tải dữ liệu gia đình. Vui lòng kiểm tra kết nối mạng.' });
       }
     );
+    return () => { active = false; unsub(); };
   },
   
   subscribeWallets: (familyId) => {
+    let active = true;
     const q = query(collection(db, 'families', familyId, 'wallets'), orderBy('createdAt', 'asc'));
-    return onSnapshot(
+    const unsub = onSnapshot(
       q,
-      (snapshot) => { set({ wallets: snapshot.docs.map(d => d.data() as Wallet) }); },
-      (error) => { console.error('[subscribeWallets] Firestore error:', error); }
+      (snapshot) => {
+        if (!active) return;
+        set({ wallets: snapshot.docs.map(d => d.data() as Wallet) });
+      },
+      (error) => {
+        if (!active) return;
+        console.error('[subscribeWallets] Firestore error:', error);
+      }
     );
+    return () => { active = false; unsub(); };
   },
 
   subscribeTransactions: (familyId) => {
+    let active = true;
     const q = query(
       collection(db, 'families', familyId, 'transactions'),
       orderBy('date', 'desc')
     );
-    return onSnapshot(
+    const unsub = onSnapshot(
       q,
-      (snapshot) => { set({ transactions: snapshot.docs.map(d => d.data() as Transaction) }); },
-      (error) => { console.error('[subscribeTransactions] Firestore error:', error); }
+      (snapshot) => {
+        if (!active) return;
+        set({ transactions: snapshot.docs.map(d => d.data() as Transaction) });
+      },
+      (error) => {
+        if (!active) return;
+        console.error('[subscribeTransactions] Firestore error:', error);
+      }
     );
+    return () => { active = false; unsub(); };
   },
 
   subscribeBudgets: (familyId) => {
-    return onSnapshot(
+    let active = true;
+    const unsub = onSnapshot(
       collection(db, 'families', familyId, 'budgets'),
-      (snapshot) => { set({ budgets: snapshot.docs.map(d => d.data() as Budget) }); },
-      (error) => { console.error('[subscribeBudgets] Firestore error:', error); }
+      (snapshot) => {
+        if (!active) return;
+        set({ budgets: snapshot.docs.map(d => d.data() as Budget) });
+      },
+      (error) => {
+        if (!active) return;
+        console.error('[subscribeBudgets] Firestore error:', error);
+      }
     );
+    return () => { active = false; unsub(); };
   },
 
   subscribeIngredients: (familyId) => {
-    return onSnapshot(
+    let active = true;
+    const unsub = onSnapshot(
       doc(db, 'families', familyId, 'settings', 'ingredients'),
       (docSnap) => {
+        if (!active) return;
         set({ availableIngredients: docSnap.exists() ? (docSnap.data().availableIngredients || []) : [] });
       },
-      (error) => { console.error('[subscribeIngredients] Firestore error:', error); }
+      (error) => {
+        if (!active) return;
+        console.error('[subscribeIngredients] Firestore error:', error);
+      }
     );
+    return () => { active = false; unsub(); };
   },
 
   saveFamily: async (family) => {
@@ -347,8 +387,8 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   },
   
   deleteWallet: async (familyId, walletId) => {
-    const family = get().family;
-    const remainingWallets = get().wallets.filter(w => w.walletId !== walletId);
+    const { family, wallets } = get();
+    const remainingWallets = wallets.filter(w => w.walletId !== walletId);
     await deleteDoc(doc(db, 'families', familyId, 'wallets', walletId));
     if (family?.defaultWalletId === walletId) {
       const newDefaultId = remainingWallets[0]?.walletId ?? null;
@@ -381,7 +421,7 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   },
 
   deleteCustomCategory: async (familyId, catId) => {
-    const family = get().family;
+    const { family, budgets } = get();
     if (!family) return;
     const current = family.customCategories || [];
     const deletedCat = current.find(c => c.id === catId);
@@ -389,7 +429,7 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     const updatedFamily = { ...family, customCategories: updated };
     await setDoc(doc(db, 'families', familyId), updatedFamily);
     if (deletedCat) {
-      const affectedBudgets = get().budgets.filter(b => b.category === deletedCat.name);
+      const affectedBudgets = budgets.filter(b => b.category === deletedCat.name);
       await Promise.all(
         affectedBudgets.map(b => deleteDoc(doc(db, 'families', familyId, 'budgets', b.budgetId)))
       );
@@ -409,13 +449,13 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   },
 
   deleteCustomIngredient: async (familyId, ingId) => {
-    const family = get().family;
+    const { family, availableIngredients } = get();
     if (!family) return;
     const current = family.customIngredients || [];
     const updated = current.filter(i => i.id !== ingId);
     const updatedFamily = { ...family, customIngredients: updated };
     await setDoc(doc(db, 'families', familyId), updatedFamily);
-    const currentAvailable = get().availableIngredients;
+    const currentAvailable = availableIngredients;
     if (currentAvailable.includes(ingId)) {
       const newAvailable = currentAvailable.filter(id => id !== ingId);
       await setDoc(doc(db, 'families', familyId, 'settings', 'ingredients'), {

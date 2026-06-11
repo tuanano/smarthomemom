@@ -104,6 +104,9 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           }}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirm-dialog-title"
             onClick={(e) => e.stopPropagation()}
             style={{
               position: 'relative',
@@ -122,6 +125,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             <button
               type="button"
               onClick={() => handleClose(false)}
+              aria-label="Đóng"
               style={{
                 position: 'absolute',
                 top: '12px',
@@ -161,7 +165,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               </div>
 
               {/* Title */}
-              <h3 style={{
+              <h3 id="confirm-dialog-title" style={{
                 fontSize: '17px',
                 fontWeight: 700,
                 color: 'var(--text-primary)',

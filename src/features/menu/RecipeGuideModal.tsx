@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, ChefHat, Loader } from 'lucide-react';
 import { getCookingGuide } from '../../core/gemini';
+import { safeLocalStorage } from '../../core/storage';
 
 interface Props {
   dishName: string;
@@ -51,7 +52,7 @@ export default function RecipeGuideModal({ dishName, onClose }: Props) {
     const lsKey = `recipe_guide::${dishName}`;
     let cancelled = false;
 
-    const cached = localStorage.getItem(lsKey);
+    const cached = safeLocalStorage.getItem(lsKey);
     if (cached) {
       setGuide(cached);
       setLoading(false);
@@ -60,7 +61,7 @@ export default function RecipeGuideModal({ dishName, onClose }: Props) {
 
     getCookingGuide(dishName).then(text => {
       if (cancelled) return;
-      localStorage.setItem(lsKey, text);
+      safeLocalStorage.setItem(lsKey, text);
       setGuide(text);
       setLoading(false);
     }).catch(err => {
@@ -79,6 +80,9 @@ export default function RecipeGuideModal({ dishName, onClose }: Props) {
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="recipe-guide-title"
       style={{
         position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
         backgroundColor: 'rgba(0,0,0,0.45)', backdropFilter: 'blur(4px)',
@@ -99,10 +103,10 @@ export default function RecipeGuideModal({ dishName, onClose }: Props) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
             <ChefHat size={18} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-            <h3 style={{ fontSize: '15px', fontWeight: 700 }}>{dishName}</h3>
+            <h3 id="recipe-guide-title" style={{ fontSize: '15px', fontWeight: 700 }}>{dishName}</h3>
           </div>
           <button
-            type="button" onClick={onClose}
+            type="button" onClick={onClose} aria-label="Đóng"
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: '2px', flexShrink: 0 }}
           >
             <X size={20} />

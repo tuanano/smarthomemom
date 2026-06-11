@@ -98,12 +98,15 @@ export default function OnboardingPage() {
 
   // Actions for Step 1
   const addMember = () => {
-    if (!newName.trim()) return;
+    const name = newName.trim();
+    if (!name) return;
+    if (name.length > 100) { showToast('Tên không được vượt quá 100 ký tự', 'warning'); return; }
+    const age = Math.min(120, Math.max(1, parseInt(newAgeStr) || 1));
     const newMember: FamilyMember = {
       id: Date.now().toString(),
-      name: newName.trim(),
+      name,
       role: newRole,
-      age: parseInt(newAgeStr) || 1,
+      age,
       gender: newGender,
       activityLevel: newActivity
     };
@@ -133,10 +136,13 @@ export default function OnboardingPage() {
   };
 
   const saveMemberEdit = () => {
-    if (!editingMemberId || !editMemberName.trim()) return;
+    if (!editingMemberId) return;
+    const name = editMemberName.trim();
+    if (!name) return;
+    const age = Math.min(120, Math.max(1, parseInt(editMemberAgeStr) || 1));
     setMembers(members.map(m =>
       m.id === editingMemberId
-        ? { ...m, name: editMemberName.trim(), role: editMemberRole, age: parseInt(editMemberAgeStr) || 1, gender: editMemberGender, activityLevel: editMemberActivity }
+        ? { ...m, name, role: editMemberRole, age, gender: editMemberGender, activityLevel: editMemberActivity }
         : m
     ));
     setEditingMemberId(null);
@@ -144,8 +150,13 @@ export default function OnboardingPage() {
 
   // Actions for Step 2
   const addCustomWallet = () => {
-    if (!customWalletName.trim()) {
+    const name = customWalletName.trim();
+    if (!name) {
       showToast("Vui lòng nhập tên ví!", "warning");
+      return;
+    }
+    if (name.length > 50) {
+      showToast("Tên ví không được vượt quá 50 ký tự", "warning");
       return;
     }
     const newW = {
@@ -207,6 +218,14 @@ export default function OnboardingPage() {
 
   const handleNextStep = () => {
     if (step === 1) {
+      if (!familyName.trim()) {
+        showToast("Vui lòng nhập tên gia đình!", "warning");
+        return;
+      }
+      if (familyName.trim().length > 100) {
+        showToast("Tên gia đình không được vượt quá 100 ký tự", "warning");
+        return;
+      }
       if (members.length === 0) {
         showToast("Vui lòng khai báo ít nhất một thành viên gia đình!", "warning");
         return;

@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useToast } from '../../components/Toast';
 import { useFamilyStore } from '../../stores/familyStore';
 import { getMergedCategories } from '../../core/constants';
+import { toDate } from '../../types';
 import type { Transaction } from '../../types';
 import { X, Calculator, Calendar } from 'lucide-react';
 import { format } from 'date-fns';
@@ -13,6 +14,17 @@ interface TransactionModalProps {
   transactionToEdit?: Transaction;
   defaultWalletId?: string;
   defaultType?: 'income' | 'expense' | 'transfer';
+}
+
+function evaluateMath(expr: string): number {
+  const clean = expr.replace(/[^0-9+\-*/.]/g, '');
+  if (!clean) return 0;
+  try {
+    const res = new Function(`return ${clean}`)();
+    return typeof res === 'number' && isFinite(res) && res >= 0 ? res : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export default function TransactionModal({ isOpen, onClose, transactionToEdit, defaultWalletId, defaultType }: TransactionModalProps) {
@@ -81,7 +93,7 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
         setSelectedCategory(transactionToEdit.category);
         setNote(transactionToEdit.note);
         
-        const date = transactionToEdit.date?.toDate ? transactionToEdit.date.toDate() : new Date(transactionToEdit.date);
+        const date = toDate(transactionToEdit.date);
         setDateStr(format(date, 'yyyy-MM-dd'));
         setSelectedHour(date.getHours());
         setSelectedMinute(date.getMinutes());
@@ -133,19 +145,118 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
     }
   }, [isOpen, showTimePicker, selectedHour, selectedMinute]);
 
-  if (!isOpen || !family) return null;
+  const modalRef = useRef<HTMLDivElement>(null);
 
-  // Safe evaluation
-  const evaluateMath = (expr: string): number => {
-    const clean = expr.replace(/[^0-9+\-*/.]/g, '');
-    if (!clean) return 0;
-    try {
-      const res = new Function(`return ${clean}`)();
-      return typeof res === 'number' && isFinite(res) && res >= 0 ? res : 0;
-    } catch {
-      return 0;
+  // Focus trap: keep keyboard focus inside the modal while open
+  useEffect(() => {
+    if (!isOpen) return;
+    const modal = modalRef.current;
+    if (!modal) return;
+    const focusable = modal.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    focusable[0]?.focus();
+    const handleTab = (e: KeyboardEvent) => {
+      if (e.key !== 'Tab') return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey) {
+        if (document.activeElement === first) { e.preventDefault(); last?.focus(); }
+      } else {
+        if (document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      }
+    };
+    modal.addEventListener('keydown', handleTab);
+    return () => modal.removeEventListener('keydown', handleTab);
+  }, [isOpen]);
+
+  // Close on Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [isOpen, onClose]);
+
+  const handleSave = useCallback(async () => {
+    if (!family) return;
+    let finalType = type;
+    let finalAmount = evaluateMath(amountExpr);
+    let finalCategory = selectedCategory;
+    let finalNote = note.trim();
+
+    if (finalAmount <= 0) {
+      showToast("Vui lòng nhập số tiền lớn hơn 0", "warning");
+      return;
     }
-  };
+    if (!selectedWalletId) {
+      showToast("Vui lòng chọn ví thanh toán", "warning");
+      return;
+    }
+    if (type === 'transfer' && !targetWalletId) {
+      showToast("Vui lòng chọn ví nhận", "warning");
+      return;
+    }
+    if (type === 'transfer' && selectedWalletId === targetWalletId) {
+      showToast("Ví chuyển và ví nhận phải khác nhau", "warning");
+      return;
+    }
+
+    const transactionData: Transaction = {
+      transactionId: transactionToEdit ? transactionToEdit.transactionId : Date.now().toString(),
+      walletId: selectedWalletId,
+      type: finalType,
+      amount: finalAmount,
+      category: type === 'transfer' ? 'Chuyển ví' : finalCategory,
+      note: finalNote || (type === 'transfer' ? 'Chuyển tiền' : finalCategory),
+      date: (() => {
+        const d = new Date(dateStr);
+        d.setHours(selectedHour);
+        d.setMinutes(selectedMinute);
+        d.setSeconds(0);
+        d.setMilliseconds(0);
+        return d;
+      })(),
+      createdAt: transactionToEdit ? (toDate(transactionToEdit.createdAt)) : new Date(),
+      ...(type === 'transfer' ? { toWalletId: targetWalletId } : {}),
+      ...(type === 'expense' ? { spentBy } : {})
+    };
+
+    try {
+      if (transactionToEdit) {
+        await updateTransaction(family.familyId, transactionToEdit, transactionData);
+      } else {
+        await createTransaction(family.familyId, transactionData);
+      }
+      setAmountExpr('');
+      setNote('');
+      onClose();
+    } catch (err) {
+      console.error(err);
+      showToast(transactionToEdit ? "Lỗi khi cập nhật giao dịch" : "Lỗi khi thêm giao dịch", "error");
+    }
+  }, [type, amountExpr, note, selectedWalletId, targetWalletId, selectedCategory, dateStr, selectedHour, selectedMinute, spentBy, transactionToEdit, family, updateTransaction, createTransaction, onClose, showToast]);
+
+  const handleDelete = useCallback(async () => {
+    if (!transactionToEdit || !family) return;
+    const yes = await confirm({
+      title: 'Xóa giao dịch',
+      message: 'Bạn có chắc chắn muốn xóa giao dịch này? Số dư ví sẽ được tự động cập nhật lại.',
+      confirmText: 'Xóa',
+      variant: 'danger'
+    });
+    if (yes) {
+      try {
+        await deleteTransaction(family.familyId, transactionToEdit);
+        onClose();
+      } catch (err) {
+        console.error(err);
+        showToast('Lỗi khi xóa giao dịch', 'error');
+      }
+    }
+  }, [transactionToEdit, family, confirm, deleteTransaction, onClose, showToast]);
+
+  if (!isOpen || !family) return null;
 
   // Format display: số thuần → có dấu phân cách, expression → giữ nguyên
   const formatExprDisplay = (expr: string): string => {
@@ -195,98 +306,24 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
     c => c.type === type
   );
 
-  const handleSave = async () => {
-    let finalType = type;
-    let finalAmount = evaluateMath(amountExpr);
-    let finalCategory = selectedCategory;
-    let finalNote = note.trim();
-
-    if (finalAmount <= 0) {
-      showToast("Vui lòng nhập số tiền lớn hơn 0", "warning");
-      return;
-    }
-
-    if (!selectedWalletId) {
-      showToast("Vui lòng chọn ví thanh toán", "warning");
-      return;
-    }
-    if (type === 'transfer' && !targetWalletId) {
-      showToast("Vui lòng chọn ví nhận", "warning");
-      return;
-    }
-    if (type === 'transfer' && selectedWalletId === targetWalletId) {
-      showToast("Ví chuyển và ví nhận phải khác nhau", "warning");
-      return;
-    }
-
-    const transactionData: Transaction = {
-      transactionId: transactionToEdit ? transactionToEdit.transactionId : Date.now().toString(),
-      walletId: selectedWalletId,
-      type: finalType,
-      amount: finalAmount,
-      category: type === 'transfer' ? 'Chuyển ví' : finalCategory,
-      note: finalNote || (type === 'transfer' ? 'Chuyển tiền' : finalCategory),
-      date: (() => {
-        const d = new Date(dateStr);
-        d.setHours(selectedHour);
-        d.setMinutes(selectedMinute);
-        d.setSeconds(0);
-        d.setMilliseconds(0);
-        return d;
-      })(),
-      createdAt: transactionToEdit ? (transactionToEdit.createdAt?.toDate ? transactionToEdit.createdAt.toDate() : new Date(transactionToEdit.createdAt)) : new Date(),
-      ...(type === 'transfer' ? { toWalletId: targetWalletId } : {}),
-      ...(type === 'expense' ? { spentBy } : {})
-    };
-
-    try {
-      if (transactionToEdit) {
-        await updateTransaction(family.familyId, transactionToEdit, transactionData);
-      } else {
-        await createTransaction(family.familyId, transactionData);
-      }
-      setAmountExpr('');
-      setNote('');
-      onClose();
-    } catch (err) {
-      console.error(err);
-      showToast(transactionToEdit ? "Lỗi khi cập nhật giao dịch" : "Lỗi khi thêm giao dịch", "error");
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!transactionToEdit) return;
-    const yes = await confirm({
-      title: 'Xóa giao dịch',
-      message: 'Bạn có chắc chắn muốn xóa giao dịch này? Số dư ví sẽ được tự động cập nhật lại.',
-      confirmText: 'Xóa',
-      variant: 'danger'
-    });
-    if (yes) {
-      try {
-        await deleteTransaction(family.familyId, transactionToEdit);
-        onClose();
-      } catch (err) {
-        console.error(err);
-        showToast('Lỗi khi xóa giao dịch', 'error');
-      }
-    }
-  };
-
   return (
-    <div style={{
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: 'rgba(61, 64, 91, 0.4)',
-      backdropFilter: 'blur(4px)',
-      zIndex: 999,
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'flex-end'
-    }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={transactionToEdit ? 'Chi tiết & Sửa giao dịch' : 'Ghi chép chi tiêu'}
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(61, 64, 91, 0.4)',
+        backdropFilter: 'blur(4px)',
+        zIndex: 999,
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'flex-end'
+      }}>
       <style>{`
         @keyframes blink-cursor {
           0%, 100% { opacity: 1; }
@@ -303,7 +340,7 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
           scrollbar-width: none;
         }
       `}</style>
-      <div style={{
+      <div ref={modalRef} style={{
         backgroundColor: 'var(--bg-cream)',
         borderTopLeftRadius: 'var(--border-radius-lg)',
         borderTopRightRadius: 'var(--border-radius-lg)',
@@ -324,7 +361,7 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
           <h2 style={{ fontSize: '18px' }}>
             {transactionToEdit ? 'Chi tiết & Sửa giao dịch' : 'Ghi chép chi tiêu'}
           </h2>
-          <button type="button" onClick={onClose} style={{
+          <button type="button" onClick={onClose} aria-label="Đóng" style={{
             background: 'none',
             border: 'none',
             color: 'var(--text-secondary)',
@@ -380,7 +417,7 @@ export default function TransactionModal({ isOpen, onClose, transactionToEdit, d
           {/* Amount Display with Calculator Trigger */}
           <div className="form-group" style={{ marginBottom: '16px' }}>
             <label>Số tiền (VND)</label>
-            <div ref={amountInputRef} style={{ position: 'relative' }} onClick={() => setShowKeypad(true)}>
+            <div ref={amountInputRef} style={{ position: 'relative' }} role="button" tabIndex={0} aria-label="Nhập số tiền" onClick={() => setShowKeypad(true)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowKeypad(true); } }}>
               <Calculator size={18} style={{ position: 'absolute', right: '16px', top: '15px', color: 'var(--primary)' }} />
               <div
                 className="form-control"

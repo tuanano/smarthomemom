@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, AreaChart, Area,
   XAxis, Tooltip, CartesianGrid
 } from 'recharts';
+import { toDate } from '../../types';
 import type { Budget, Transaction } from '../../types';
 
 interface Props {
@@ -54,7 +55,7 @@ export default function BudgetDetailPage({ budget, transactions, onBack }: Props
   const monthTxs = useMemo(() => {
     return transactions.filter(t => {
       if (t.type !== 'expense' || t.category !== budget.category) return false;
-      const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      const d = toDate(t.date);
       return d.getMonth() === month && d.getFullYear() === year;
     });
   }, [transactions, budget.category, month, year]);
@@ -63,7 +64,7 @@ export default function BudgetDetailPage({ budget, transactions, onBack }: Props
   const dailySpending = useMemo(() => {
     const map: Record<number, number> = {};
     monthTxs.forEach(t => {
-      const d = t.date?.toDate ? t.date.toDate() : new Date(t.date);
+      const d = toDate(t.date);
       const day = d.getDate();
       map[day] = (map[day] || 0) + t.amount;
     });
