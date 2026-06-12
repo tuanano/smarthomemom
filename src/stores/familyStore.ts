@@ -4,15 +4,12 @@ import {
   doc,
   collection,
   onSnapshot,
-  runTransaction,
-  setDoc,
-  updateDoc,
   query,
   orderBy,
-  deleteDoc
 } from 'firebase/firestore';
 import type { Family, Wallet, Transaction, Budget, CustomCategory, CustomIngredient, FavoriteMenu } from '../types';
 import { DEFAULT_CATEGORIES, DEFAULT_INGREDIENTS } from '../core/constants';
+import { api, serializeDates } from '../utils/apiClient';
 
 interface FamilyState {
   family: Family | null;
@@ -209,234 +206,79 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
   },
 
   saveFamily: async (family) => {
-    await setDoc(doc(db, 'families', family.familyId), family);
+    await api.put('/families/me', family);
     set({ family });
   },
-  
-  createWallet: async (familyId, wallet) => {
-    const walletDocRef = doc(collection(db, 'families', familyId, 'wallets'), wallet.walletId);
-    await setDoc(walletDocRef, {
-      ...wallet,
-      createdAt: new Date()
-    });
+
+  createWallet: async (_familyId, wallet) => {
+    await api.post('/families/me/wallets', wallet);
   },
 
-  updateWallet: async (familyId, walletId, updates) => {
-    const walletDocRef = doc(db, 'families', familyId, 'wallets', walletId);
-    await updateDoc(walletDocRef, updates);
+  updateWallet: async (_familyId, walletId, updates) => {
+    await api.put(`/families/me/wallets/${walletId}`, updates);
     set(state => ({
-      wallets: state.wallets.map(w => w.walletId === walletId ? { ...w, ...updates } : w)
+      wallets: state.wallets.map(w => w.walletId === walletId ? { ...w, ...updates } : w),
     }));
   },
-  
-  createTransaction: async (familyId, transaction) => {
-    const transactionDocRef = doc(collection(db, 'families', familyId, 'transactions'), transaction.transactionId);
-    const walletDocRef = doc(db, 'families', familyId, 'wallets', transaction.walletId);
-    
-    // Use Firestore Transaction to update wallet balance atomicaly
-    await runTransaction(db, async (firestoreTransaction) => {
-      const walletDoc = await firestoreTransaction.get(walletDocRef);
-      if (!walletDoc.exists()) {
-        throw new Error("Wallet does not exist!");
-      }
-      
-      const currentBalance = walletDoc.data().balance || 0;
-      let newBalance = currentBalance;
-      
-      if (transaction.type === 'expense') {
-        newBalance -= transaction.amount;
-      } else if (transaction.type === 'income') {
-        newBalance += transaction.amount;
-      } else if (transaction.type === 'transfer' && transaction.toWalletId) {
-        newBalance -= transaction.amount;
-        const targetWalletDocRef = doc(db, 'families', familyId, 'wallets', transaction.toWalletId);
-        const targetWalletDoc = await firestoreTransaction.get(targetWalletDocRef);
-        if (!targetWalletDoc.exists()) throw new Error("Ví nhận không tồn tại!");
-        const targetBalance = targetWalletDoc.data().balance || 0;
-        firestoreTransaction.update(targetWalletDocRef, { balance: targetBalance + transaction.amount });
-      }
 
-      firestoreTransaction.set(transactionDocRef, transaction);
-      firestoreTransaction.update(walletDocRef, { balance: newBalance });
-    });
-  },
-  
-  deleteTransaction: async (familyId, transaction) => {
-    const transactionDocRef = doc(db, 'families', familyId, 'transactions', transaction.transactionId);
-    const walletDocRef = doc(db, 'families', familyId, 'wallets', transaction.walletId);
-    
-    await runTransaction(db, async (firestoreTransaction) => {
-      const walletDoc = await firestoreTransaction.get(walletDocRef);
-      if (!walletDoc.exists()) {
-        throw new Error("Wallet does not exist!");
-      }
-      
-      const currentBalance = walletDoc.data().balance || 0;
-      let newBalance = currentBalance;
-      
-      // Reverse transaction effect
-      if (transaction.type === 'expense') {
-        newBalance += transaction.amount;
-      } else if (transaction.type === 'income') {
-        newBalance -= transaction.amount;
-      } else if (transaction.type === 'transfer' && transaction.toWalletId) {
-        newBalance += transaction.amount;
-        const targetWalletDocRef = doc(db, 'families', familyId, 'wallets', transaction.toWalletId);
-        const targetWalletDoc = await firestoreTransaction.get(targetWalletDocRef);
-        if (!targetWalletDoc.exists()) throw new Error("Ví nhận không tồn tại!");
-        const targetBalance = targetWalletDoc.data().balance || 0;
-        firestoreTransaction.update(targetWalletDocRef, { balance: targetBalance - transaction.amount });
-      }
-
-      firestoreTransaction.delete(transactionDocRef);
-      firestoreTransaction.update(walletDocRef, { balance: newBalance });
-    });
+  createTransaction: async (_familyId, transaction) => {
+    await api.post('/families/me/transactions', serializeDates(transaction));
   },
 
-  updateTransaction: async (familyId, oldTx, newTx) => {
-    const oldTxDocRef = doc(db, 'families', familyId, 'transactions', oldTx.transactionId);
-    const newTxDocRef = doc(db, 'families', familyId, 'transactions', newTx.transactionId);
-    const oldWalletDocRef = doc(db, 'families', familyId, 'wallets', oldTx.walletId);
-    const newWalletDocRef = doc(db, 'families', familyId, 'wallets', newTx.walletId);
-
-    await runTransaction(db, async (firestoreTransaction) => {
-      // --- READ PHASE ---
-      
-      // 1. Fetch old wallet
-      const oldWalletDoc = await firestoreTransaction.get(oldWalletDocRef);
-      if (!oldWalletDoc.exists()) throw new Error("Old wallet not found");
-      
-      // 2. Fetch new wallet (if different)
-      let newWalletDoc = oldWalletDoc;
-      if (oldTx.walletId !== newTx.walletId) {
-        const fetchNewWallet = await firestoreTransaction.get(newWalletDocRef);
-        if (!fetchNewWallet.exists()) throw new Error("New wallet not found");
-        newWalletDoc = fetchNewWallet;
-      }
-      
-      // 3. Fetch old transfer target wallet (if it was a transfer)
-      let oldTargetDoc: any = null;
-      if (oldTx.type === 'transfer' && oldTx.toWalletId) {
-        const oldTargetRef = doc(db, 'families', familyId, 'wallets', oldTx.toWalletId);
-        oldTargetDoc = await firestoreTransaction.get(oldTargetRef);
-      }
-      
-      // 4. Fetch new transfer target wallet (if it is a transfer)
-      let newTargetDoc: any = null;
-      if (newTx.type === 'transfer' && newTx.toWalletId) {
-        if (oldTx.type === 'transfer' && oldTx.toWalletId === newTx.toWalletId && oldTargetDoc) {
-          newTargetDoc = oldTargetDoc;
-        } else {
-          const newTargetRef = doc(db, 'families', familyId, 'wallets', newTx.toWalletId);
-          newTargetDoc = await firestoreTransaction.get(newTargetRef);
-        }
-      }
-      
-      // --- WRITE PHASE ---
-      
-      // Reverse old transaction effect
-      let oldBal = oldWalletDoc.data().balance || 0;
-      if (oldTx.type === 'expense') {
-        oldBal += oldTx.amount;
-      } else if (oldTx.type === 'income') {
-        oldBal -= oldTx.amount;
-      } else if (oldTx.type === 'transfer' && oldTx.toWalletId && oldTargetDoc && oldTargetDoc.exists()) {
-        oldBal += oldTx.amount;
-        const oldTargetRef = doc(db, 'families', familyId, 'wallets', oldTx.toWalletId);
-        const oldTargetBalance = oldTargetDoc.data().balance || 0;
-        firestoreTransaction.update(oldTargetRef, { balance: oldTargetBalance - oldTx.amount });
-      }
-
-      // If same wallet, copy reversed balance
-      let newBal = (oldTx.walletId === newTx.walletId) ? oldBal : (newWalletDoc.data().balance || 0);
-
-      // Apply new transaction effect
-      if (newTx.type === 'expense') {
-        newBal -= newTx.amount;
-      } else if (newTx.type === 'income') {
-        newBal += newTx.amount;
-      } else if (newTx.type === 'transfer' && newTx.toWalletId) {
-        if (!newTargetDoc || !newTargetDoc.exists()) throw new Error("Ví nhận không tồn tại!");
-        newBal -= newTx.amount;
-        const newTargetRef = doc(db, 'families', familyId, 'wallets', newTx.toWalletId);
-        let currentTargetBal = newTargetDoc.data().balance || 0;
-        if (oldTx.type === 'transfer' && oldTx.toWalletId === newTx.toWalletId) {
-          currentTargetBal -= oldTx.amount;
-        }
-        firestoreTransaction.update(newTargetRef, { balance: currentTargetBal + newTx.amount });
-      }
-
-      // Save balances
-      if (oldTx.walletId === newTx.walletId) {
-        firestoreTransaction.update(oldWalletDocRef, { balance: newBal });
-      } else {
-        firestoreTransaction.update(oldWalletDocRef, { balance: oldBal });
-        firestoreTransaction.update(newWalletDocRef, { balance: newBal });
-      }
-
-      // Save Tx
-      if (oldTx.transactionId !== newTx.transactionId) {
-        firestoreTransaction.delete(oldTxDocRef);
-      }
-      firestoreTransaction.set(newTxDocRef, newTx);
-    });
+  deleteTransaction: async (_familyId, transaction) => {
+    await api.delete(`/families/me/transactions/${transaction.transactionId}`);
   },
-  
-  saveBudget: async (familyId, budget) => {
-    await setDoc(doc(db, 'families', familyId, 'budgets', budget.budgetId), budget);
+
+  updateTransaction: async (_familyId, oldTx, newTx) => {
+    await api.put(`/families/me/transactions/${oldTx.transactionId}`, serializeDates(newTx));
   },
-  
-  deleteWallet: async (familyId, walletId) => {
+
+  saveBudget: async (_familyId, budget) => {
+    await api.post('/families/me/budgets', serializeDates(budget));
+  },
+
+  deleteWallet: async (_familyId, walletId) => {
     const { family, wallets } = get();
-    const remainingWallets = wallets.filter(w => w.walletId !== walletId);
-    await deleteDoc(doc(db, 'families', familyId, 'wallets', walletId));
+    await api.delete(`/families/me/wallets/${walletId}`);
     if (family?.defaultWalletId === walletId) {
-      const newDefaultId = remainingWallets[0]?.walletId ?? null;
-      await setDoc(doc(db, 'families', familyId), { ...family, defaultWalletId: newDefaultId });
+      const remaining = wallets.filter(w => w.walletId !== walletId);
+      await api.put('/families/me', { defaultWalletId: remaining[0]?.walletId ?? null });
     }
   },
 
-  deleteBudget: async (familyId, budgetId) => {
-    await deleteDoc(doc(db, 'families', familyId, 'budgets', budgetId));
+  deleteBudget: async (_familyId, budgetId) => {
+    await api.delete(`/families/me/budgets/${budgetId}`);
   },
 
-  saveIngredients: async (familyId, ingredients) => {
-    await setDoc(doc(db, 'families', familyId, 'settings', 'ingredients'), {
-      availableIngredients: ingredients,
-      updatedAt: new Date()
-    });
+  saveIngredients: async (_familyId, ingredients) => {
+    await api.put('/families/me/settings/ingredients', { availableIngredients: ingredients });
     set({ availableIngredients: ingredients });
   },
 
-  addCustomCategory: async (familyId, category) => {
+  addCustomCategory: async (_familyId, category) => {
     const family = get().family;
     if (!family) return;
     const current = family.customCategories || [];
     const exists = current.some(c => c.id === category.id);
-    const updated = exists 
+    const updated = exists
       ? current.map(c => c.id === category.id ? category : c)
       : [...current, category];
-    const updatedFamily = { ...family, customCategories: updated };
-    await setDoc(doc(db, 'families', familyId), updatedFamily);
+    await api.put('/families/me', { customCategories: updated });
   },
 
-  deleteCustomCategory: async (familyId, catId) => {
+  deleteCustomCategory: async (_familyId, catId) => {
     const { family, budgets } = get();
     if (!family) return;
-    const current = family.customCategories || [];
-    const deletedCat = current.find(c => c.id === catId);
-    const updated = current.filter(c => c.id !== catId);
-    const updatedFamily = { ...family, customCategories: updated };
-    await setDoc(doc(db, 'families', familyId), updatedFamily);
+    const deletedCat = (family.customCategories || []).find(c => c.id === catId);
+    const updated = (family.customCategories || []).filter(c => c.id !== catId);
+    await api.put('/families/me', { customCategories: updated });
     if (deletedCat) {
-      const affectedBudgets = budgets.filter(b => b.category === deletedCat.name);
-      await Promise.all(
-        affectedBudgets.map(b => deleteDoc(doc(db, 'families', familyId, 'budgets', b.budgetId)))
-      );
+      const affected = budgets.filter(b => b.category === deletedCat.name);
+      await Promise.all(affected.map(b => api.delete(`/families/me/budgets/${b.budgetId}`)));
     }
   },
 
-  addCustomIngredient: async (familyId, ingredient) => {
+  addCustomIngredient: async (_familyId, ingredient) => {
     const family = get().family;
     if (!family) return;
     const current = family.customIngredients || [];
@@ -444,29 +286,22 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     const updated = exists
       ? current.map(i => i.id === ingredient.id ? ingredient : i)
       : [...current, ingredient];
-    const updatedFamily = { ...family, customIngredients: updated };
-    await setDoc(doc(db, 'families', familyId), updatedFamily);
+    await api.put('/families/me', { customIngredients: updated });
   },
 
-  deleteCustomIngredient: async (familyId, ingId) => {
+  deleteCustomIngredient: async (_familyId, ingId) => {
     const { family, availableIngredients } = get();
     if (!family) return;
-    const current = family.customIngredients || [];
-    const updated = current.filter(i => i.id !== ingId);
-    const updatedFamily = { ...family, customIngredients: updated };
-    await setDoc(doc(db, 'families', familyId), updatedFamily);
-    const currentAvailable = availableIngredients;
-    if (currentAvailable.includes(ingId)) {
-      const newAvailable = currentAvailable.filter(id => id !== ingId);
-      await setDoc(doc(db, 'families', familyId, 'settings', 'ingredients'), {
-        availableIngredients: newAvailable,
-        updatedAt: new Date()
-      });
+    const updated = (family.customIngredients || []).filter(i => i.id !== ingId);
+    await api.put('/families/me', { customIngredients: updated });
+    if (availableIngredients.includes(ingId)) {
+      const newAvailable = availableIngredients.filter(id => id !== ingId);
+      await api.put('/families/me/settings/ingredients', { availableIngredients: newAvailable });
       set({ availableIngredients: newAvailable });
     }
   },
 
-  saveFavoriteMenu: async (familyId, favMenu) => {
+  saveFavoriteMenu: async (_familyId, favMenu) => {
     const family = get().family;
     if (!family) return;
     const current = family.favoriteMenus || [];
@@ -474,16 +309,13 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     const updated = exists
       ? current.map(m => m.favMenuId === favMenu.favMenuId ? favMenu : m)
       : [...current, favMenu];
-    const updatedFamily = { ...family, favoriteMenus: updated };
-    await setDoc(doc(db, 'families', familyId), updatedFamily);
+    await api.put('/families/me', { favoriteMenus: updated });
   },
 
-  deleteFavoriteMenu: async (familyId, favMenuId) => {
+  deleteFavoriteMenu: async (_familyId, favMenuId) => {
     const family = get().family;
     if (!family) return;
-    const current = family.favoriteMenus || [];
-    const updated = current.filter(m => m.favMenuId !== favMenuId);
-    const updatedFamily = { ...family, favoriteMenus: updated };
-    await setDoc(doc(db, 'families', familyId), updatedFamily);
+    const updated = (family.favoriteMenus || []).filter(m => m.favMenuId !== favMenuId);
+    await api.put('/families/me', { favoriteMenus: updated });
   }
 }));

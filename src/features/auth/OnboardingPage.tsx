@@ -5,8 +5,7 @@ import { useAuthStore } from '../../stores/authStore';
 import type { Family, FamilyMember } from '../../types';
 import { Plus, Trash2, Users, Flame, ArrowRight, ArrowLeft, Coins, CreditCard, PiggyBank, Pencil, Check, UserCheck } from 'lucide-react';
 import { DEFAULT_CATEGORIES, DEFAULT_INGREDIENTS } from '../../core/constants';
-import { doc, getDoc, writeBatch, collection } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { api } from '../../utils/apiClient';
 
 export default function OnboardingPage() {
   const { user } = useAuthStore();
@@ -251,80 +250,48 @@ export default function OnboardingPage() {
     setLoading(true);
 
     // Guard: if family already exists (e.g. cache miss routed here on new device), abort
-    const existingSnap = await getDoc(doc(db, 'families', user.uid));
-    if (existingSnap.exists()) {
-      // subscribeFamily will pick up the data via its onSnapshot listener
+    try {
+      await api.get('/families/me');
       setLoading(false);
       return;
+    } catch {
+      // 404 = family doesn't exist yet, proceed with onboarding
     }
 
-    // Calculate macros
     const protein = Math.round((totalCalories * 0.20) / 4);
     const carbs = Math.round((totalCalories * 0.55) / 4);
     const fat = Math.round((totalCalories * 0.25) / 9);
 
-    const familyData: Family = {
-      familyId: user.uid,
-      familyName: familyName.trim() || 'Gia đình của tôi',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      members,
-      nutritionTargets: {
-        calories: totalCalories,
-        protein,
-        carbs,
-        fat
-      },
-      defaultWalletId,
-      customCategories: DEFAULT_CATEGORIES,
-      customIngredients: DEFAULT_INGREDIENTS,
-      ...(linkedMemberId ? { linkedMemberIds: { [user.uid]: linkedMemberId } } : {}),
-    };
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
     try {
-      // Use a batch so all writes succeed or all fail atomically.
-      // Prevents the broken state where family doc exists but wallets/budgets are missing.
-      const batch = writeBatch(db);
-      const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
-
-      // 1. Family document
-      batch.set(doc(db, 'families', user.uid), familyData);
-
-      // 2. Wallets
-      for (const w of walletsSetup) {
-        batch.set(
-          doc(collection(db, 'families', user.uid, 'wallets'), w.walletId),
-          { ...w, includeInBalance: w.includeInBalance !== false, createdAt: now }
-        );
-      }
-
-      // 3. Active budgets
-      for (const b of budgetsSetup) {
-        if (b.active) {
-          const budgetId = 'budget_' + b.category.replace(/\s+/g, '').replace(/\//g, '');
-          batch.set(
-            doc(db, 'families', user.uid, 'budgets', budgetId),
-            {
-              budgetId,
-              category: b.category,
-              limitAmount: b.limitAmount,
-              spentAmount: 0,
-              period: 'monthly',
-              startDate: monthStart,
-              endDate: monthEnd,
-              alertThreshold: 0.8,
-              isAlerted: false
-            }
-          );
-        }
-      }
-
-      await batch.commit();
+      await api.post('/families/me/onboard', {
+        familyName: familyName.trim() || 'Gia đình của tôi',
+        members,
+        nutritionTargets: { calories: totalCalories, protein, carbs, fat },
+        defaultWalletId,
+        customCategories: DEFAULT_CATEGORIES,
+        customIngredients: DEFAULT_INGREDIENTS,
+        ...(linkedMemberId ? { linkedMemberIds: { [user.uid]: linkedMemberId } } : {}),
+        wallets: walletsSetup.map(w => ({ ...w, includeInBalance: w.includeInBalance !== false })),
+        budgets: budgetsSetup
+          .filter(b => b.active)
+          .map(b => ({
+            category: b.category,
+            limitAmount: b.limitAmount,
+            spentAmount: 0,
+            period: 'monthly',
+            startDate: monthStart.toISOString(),
+            endDate: monthEnd.toISOString(),
+            alertThreshold: 0.8,
+            isAlerted: false,
+          })),
+      });
     } catch (err) {
-      console.error("Error saving onboarding details: ", err);
-      showToast("Đã xảy ra lỗi khi lưu, vui lòng thử lại!", "error");
+      console.error('Error saving onboarding details:', err);
+      showToast('Đã xảy ra lỗi khi lưu, vui lòng thử lại!', 'error');
     } finally {
       setLoading(false);
     }
