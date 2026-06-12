@@ -10,6 +10,12 @@ import {
   syncDailyStatusToSW,
   registerPeriodicSync,
 } from '../utils/swStatusCache';
+import {
+  subscribeToWebPush,
+  updateWebPushSettings,
+  unsubscribeFromWebPush,
+  isPushSupported,
+} from '../utils/webPush';
 import { format } from 'date-fns';
 import { toDate } from '../types';
 
@@ -111,11 +117,48 @@ export function useReminderService() {
       });
   }, [user, transactions]);
 
-  // ── Register Periodic Background Sync (fires even when app is closed) ───
+  // ── Register Periodic Background Sync (Android fallback) ────────────────
   useEffect(() => {
     if (!user || !enabled) return;
     registerPeriodicSync();
   }, [user, enabled]);
+
+  // ── Web Push: subscribe/unsubscribe when notifications toggled ───────────
+  useEffect(() => {
+    if (!user || !isPushSupported()) return;
+
+    const settings = {
+      expenseReminderEnabled,
+      expenseReminderHour,
+      expenseReminderMinute,
+      menuReminderEnabled,
+      menuReminderHour,
+      menuReminderMinute,
+    };
+
+    if (enabled) {
+      subscribeToWebPush(settings).catch(() => {});
+    } else {
+      unsubscribeFromWebPush().catch(() => {});
+    }
+  }, [user, enabled]);
+
+  // ── Sync Web Push settings whenever reminder config changes ──────────────
+  useEffect(() => {
+    if (!user || !enabled || !isPushSupported()) return;
+    updateWebPushSettings({
+      expenseReminderEnabled,
+      expenseReminderHour,
+      expenseReminderMinute,
+      menuReminderEnabled,
+      menuReminderHour,
+      menuReminderMinute,
+    }).catch(() => {});
+  }, [
+    user, enabled,
+    expenseReminderEnabled, expenseReminderHour, expenseReminderMinute,
+    menuReminderEnabled, menuReminderHour, menuReminderMinute,
+  ]);
 
   // ── Monthly budget dedup reset ──────────────────────────────────────────
   useEffect(() => {

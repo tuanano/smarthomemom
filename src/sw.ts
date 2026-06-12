@@ -19,6 +19,25 @@ registerRoute(
   })
 );
 
+// ── Web Push: receive server-sent notifications ───────────────────────────
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  let payload: { title: string; body: string; tag?: string; icon?: string };
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { title: 'SmartHomeMom', body: event.data.text() };
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: payload.icon || import.meta.env.BASE_URL + 'pwa-192x192.png',
+      badge: import.meta.env.BASE_URL + 'pwa-192x192.png',
+      tag: payload.tag || 'smm-push',
+    })
+  );
+});
+
 // ── Open app when user taps a notification ────────────────────────────────
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
