@@ -1,4 +1,5 @@
 import { useFamilyStore } from '../stores/familyStore';
+import { api } from '../utils/apiClient';
 
 interface SuggestionRequest {
   dailyCalorieTarget: number;
@@ -110,40 +111,16 @@ const MOCK_RECIPES: {
   { name: 'Rau luộc chấm tương', type: 'soup', pref: 'chay', calories: 90, cost: 15000, ingredients: ['rau_muong', 'gia_vi'] },
 ];
 
-// ─── Shared fetch helper with retry ──────────────────────────────────────────
+// ─── Ingredient map helper ────────────────────────────────────────────────────
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
-
-class GeminiClientError extends Error {}
-
-async function callGemini(prompt: string, apiKey: string, jsonMode: boolean): Promise<string> {
-  const url = `${GEMINI_URL}?key=${apiKey}`;
-  const body = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
-    ...(jsonMode ? { generationConfig: { responseMimeType: 'application/json' } } : {}),
-  });
-
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (attempt > 0) await new Promise<void>(r => setTimeout(r, 1000 * attempt));
-    try {
-      const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-      if (!res.ok) {
-        // 4xx = auth / quota / bad request — no point retrying
-        if (res.status >= 400 && res.status < 500) throw new GeminiClientError(`Gemini API ${res.status}`);
-        lastErr = new Error(`Gemini API ${res.status}`);
-        continue; // 5xx — retry
-      }
-      const json = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
-      const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) throw new Error('Empty Gemini response');
-      return text;
-    } catch (err) {
-      if (err instanceof GeminiClientError) throw err; // no retry on 4xx
-      lastErr = err; // network error or 5xx from above — retry
-    }
-  }
-  throw lastErr ?? new Error('Gemini call failed after retries');
+function buildIngredientMap(availableIngredients: string[]): Record<string, string> {
+  const customIngredients = useFamilyStore.getState().customIngredients || [];
+  return Object.fromEntries(
+    availableIngredients.map(id => {
+      const ing = customIngredients.find(i => i.id === id);
+      return [id, ing?.name ?? id];
+    }),
+  );
 }
 
 // ─── Response shape guards ────────────────────────────────────────────────────
@@ -178,151 +155,55 @@ function isCalorieEstimate(obj: unknown): obj is CalorieEstimate {
     typeof o.carbsGrams === 'number' && typeof o.fatGrams === 'number';
 }
 
-// ─── Existing: generate full day menu ─────────────────────────────────────────
+// ─── API-backed implementations ──────────────────────────────────────────────
 
 export async function generateDailyMenu(req: SuggestionRequest): Promise<DailyMenuResponse> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'mock-gemini-key') return generateMockMenu(req);
-
-  const customIngredients = useFamilyStore.getState().customIngredients || [];
-  const allIngredients = customIngredients;
-
-  const availableIdNameMap = req.availableIngredients
-    .map(id => {
-      const ing = allIngredients.find(i => i.id === id);
-      return ing ? `"${ing.id}": "${ing.name}"` : null;
-    })
-    .filter(Boolean)
-    .join(', ');
-
-  const prompt = `
-Bạn là chuyên gia dinh dưỡng Việt Nam. Thiết kế thực đơn 3 bữa trong ngày, đáp ứng:
-1. Nhu cầu Calo MỖI NGƯỜI: ${req.dailyCalorieTarget} Kcal/ngày. Tổng calories các món phải gần mức này.
-2. CHỈ dùng nguyên liệu từ danh sách sau. Trong ingredientsUsed chỉ được dùng ĐÚNG ID (không tự đặt id mới):
-   { ${availableIdNameMap} }
-3. Tránh lặp: [${req.recentMeals.slice(0, 15).join(', ')}].
-
-QUAN TRỌNG: calories mỗi món = Kcal CHO 1 NGƯỜI (1 khẩu phần). Ví dụ: cháo/canh 80-200, phở/bún 400-550, cơm tấm 500-650, kho/chiên 300-450.
-totalDayCalories = tổng calories/người cả ngày (phải gần ${req.dailyCalorieTarget}).
-
-JSON duy nhất, không markdown:
-{
-  "meals": {
-    "breakfast": [{"recipeName": "Tên món", "calories": 350, "estimatedCost": 0, "ingredientsUsed": ["trung_ga"]}],
-    "lunch": [{"recipeName": "Món mặn", "calories": 420, "estimatedCost": 0, "ingredientsUsed": ["thit_heo"]}, {"recipeName": "Canh rau", "calories": 80, "estimatedCost": 0, "ingredientsUsed": ["rau_muong"]}],
-    "dinner": [{"recipeName": "Món cá", "calories": 380, "estimatedCost": 0, "ingredientsUsed": ["ca_loc"]}, {"recipeName": "Canh bí", "calories": 100, "estimatedCost": 0, "ingredientsUsed": ["bi_do"]}]
-  },
-  "totalDayCalories": 1330,
-  "estimatedTotalCost": 0,
-  "nutritionSummary": {"proteinGrams": 65, "carbsGrams": 160, "fatGrams": 45},
-  "healthNote": "Lời khuyên dinh dưỡng 1 câu"
-}
-`;
-
   try {
-    const text = await callGemini(prompt, apiKey, true);
-    const parsed: unknown = JSON.parse(text);
-    if (!isDailyMenuResponse(parsed)) throw new Error('Invalid daily menu response shape');
-    return parsed;
+    const result = await api.post<DailyMenuResponse>('/ai/daily-menu', {
+      dailyCalorieTarget: req.dailyCalorieTarget,
+      availableIngredients: req.availableIngredients,
+      ingredientMap: buildIngredientMap(req.availableIngredients),
+      recentMeals: req.recentMeals,
+    });
+    if (!isDailyMenuResponse(result)) throw new Error('Invalid response shape');
+    return result;
   } catch (err) {
-    console.error('Gemini generateDailyMenu failed, falling back to mock:', err);
+    console.error('generateDailyMenu failed, falling back to mock:', err);
     return generateMockMenu(req);
   }
 }
 
-// ─── New: suggest individual meal options ─────────────────────────────────────
-
 export async function generateMealSuggestions(req: MealSuggestionRequest): Promise<MealOption[]> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'mock-gemini-key') return generateMockMealSuggestions(req);
-
-  const customIngredients = useFamilyStore.getState().customIngredients || [];
-  const allIngredients = customIngredients;
-
-  const mealTypeVN = req.mealType === 'breakfast' ? 'bữa sáng' : req.mealType === 'lunch' ? 'bữa trưa' : 'bữa tối';
-  const prefVN: Record<FoodPreference, string> = {
-    any: 'bất kỳ',
-    com: 'cơm (món ăn kèm cơm, chiên, xào, kho, nướng...)',
-    bun_pho_my: 'bún / phở / mỳ / hủ tiếu / bánh canh/ cháo mỳ',
-    chao_sup: 'cháo / súp / canh',
-    lau_nuong: 'lẩu / nướng / BBQ',
-    mon_cuon: 'món cuốn (gỏi cuốn, bánh tráng cuốn)',
-    chay: 'món chay (không thịt, đậu hũ, nấm, rau củ)',
-  };
-
-  const availableIdNameMap2 = req.availableIngredients
-    .map(id => {
-      const ing = allIngredients.find(i => i.id === id);
-      return ing ? `"${ing.id}": "${ing.name}"` : null;
-    })
-    .filter(Boolean)
-    .join(', ');
-
-  const prompt = `
-Bạn là chuyên gia dinh dưỡng Việt Nam. Gợi ý 3 món ăn cho ${mealTypeVN} của gia đình ${req.familySize} người.
-Loại món ưu tiên: ${prefVN[req.preference]}.
-Nguyên liệu có sẵn (chỉ dùng đúng id, không tự đặt id mới): { ${availableIdNameMap2} }
-Tránh trùng: [${req.recentMeals.slice(0, 10).join(', ')}].
-
-YÊU CẦU: calories = Kcal CHO 1 NGƯỜI ĂN (1 khẩu phần). Mức tham khảo: cháo/canh ≈ 80-200, phở/bún ≈ 400-550, cơm tấm/cơm chiên ≈ 500-650, kho/chiên/xào ≈ 300-450, lẩu ≈ 600-800.
-description: 1 câu mô tả ngắn, hấp dẫn.
-
-JSON array, không markdown:
-[{"recipeName":"Tên món","calories":450,"estimatedCost":0,"ingredientsUsed":["id1"],"description":"Mô tả ngắn"}]
-`;
-
   try {
-    const text = await callGemini(prompt, apiKey, true);
-    const parsed: unknown = JSON.parse(text);
-    if (!isMealOptionArray(parsed)) throw new Error('Invalid meal options response shape');
-    return parsed;
+    const result = await api.post<MealOption[]>('/ai/meal-suggestions', {
+      ...req,
+      ingredientMap: buildIngredientMap(req.availableIngredients),
+    });
+    if (!isMealOptionArray(result)) throw new Error('Invalid response shape');
+    return result;
   } catch (err) {
-    console.error('Gemini generateMealSuggestions failed, falling back to mock:', err);
+    console.error('generateMealSuggestions failed, falling back to mock:', err);
     return generateMockMealSuggestions(req);
   }
 }
 
-// ─── New: estimate calories for a manually-entered dish ──────────────────────
-
 export async function estimateDishCalories(dishName: string): Promise<CalorieEstimate> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'mock-gemini-key') return estimateCaloriesMock(dishName);
-
-  const prompt = `
-Tính thành phần dinh dưỡng cho món "${dishName}" CHO 1 NGƯỜI ĂN (1 khẩu phần bình thường).
-Dựa theo công thức nấu ăn Việt Nam truyền thống.
-
-Trả JSON (không markdown):
-{"calories":450,"proteinGrams":25,"carbsGrams":50,"fatGrams":15,"note":"Nhận xét dinh dưỡng 1 câu"}
-`;
-
   try {
-    const text = await callGemini(prompt, apiKey, true);
-    const parsed: unknown = JSON.parse(text);
-    if (!isCalorieEstimate(parsed)) throw new Error('Invalid calorie estimate response shape');
-    return parsed;
+    const result = await api.post<CalorieEstimate>('/ai/estimate-calories', { dishName });
+    if (!isCalorieEstimate(result)) throw new Error('Invalid response shape');
+    return result;
   } catch (err) {
-    console.error('Gemini estimateDishCalories failed, falling back to mock:', err);
+    console.error('estimateDishCalories failed, falling back to mock:', err);
     return estimateCaloriesMock(dishName);
   }
 }
 
-// ─── New: quick cooking guide for a dish ─────────────────────────────────────
-
 export async function getCookingGuide(dishName: string): Promise<string> {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'mock-gemini-key') return getCookingGuideMock(dishName);
-
-  const prompt = `Hướng dẫn nấu món "${dishName}" kiểu gia đình Việt, tối đa 150 chữ, theo đúng format sau (giữ nguyên dấu **):
-**Nguyên liệu:** [liệt kê ngắn các nguyên liệu cần nấu, cách nhau bằng dấu phẩy]
-**Cách làm:** [3-4 bước ngắn, mỗi bước 1 câu]
-**Mẹo:** [1 mẹo nhỏ hữu ích]
-Không thêm bất kỳ nội dung nào ngoài format trên.`;
-
   try {
-    return await callGemini(prompt, apiKey, false);
+    const result = await api.post<{ guide: string }>('/ai/cooking-guide', { dishName });
+    return result.guide;
   } catch (err) {
-    console.error('Gemini getCookingGuide failed, falling back to mock:', err);
+    console.error('getCookingGuide failed, falling back to mock:', err);
     return getCookingGuideMock(dishName);
   }
 }
