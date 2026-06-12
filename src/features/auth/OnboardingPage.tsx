@@ -2,7 +2,7 @@ import { useState } from 'react';
 import CurrencyInput from '../../components/CurrencyInput';
 import { useToast } from '../../components/Toast';
 import { useAuthStore } from '../../stores/authStore';
-import type { Family, FamilyMember } from '../../types';
+import type { FamilyMember } from '../../types';
 import { Plus, Trash2, Users, Flame, ArrowRight, ArrowLeft, Coins, CreditCard, PiggyBank, Pencil, Check, UserCheck } from 'lucide-react';
 import { DEFAULT_CATEGORIES, DEFAULT_INGREDIENTS } from '../../core/constants';
 import { api } from '../../utils/apiClient';
