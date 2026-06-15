@@ -264,6 +264,10 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
       ? current.map(c => c.id === category.id ? category : c)
       : [...current, category];
     await api.put('/families/me', { customCategories: updated });
+    set(state => ({
+      customCategories: updated,
+      family: state.family ? { ...state.family, customCategories: updated } : null,
+    }));
   },
 
   deleteCustomCategory: async (_familyId, catId) => {
@@ -272,6 +276,10 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     const deletedCat = (family.customCategories || []).find(c => c.id === catId);
     const updated = (family.customCategories || []).filter(c => c.id !== catId);
     await api.put('/families/me', { customCategories: updated });
+    set(state => ({
+      customCategories: updated,
+      family: state.family ? { ...state.family, customCategories: updated } : null,
+    }));
     if (deletedCat) {
       const affected = budgets.filter(b => b.category === deletedCat.name);
       await Promise.all(affected.map(b => api.delete(`/families/me/budgets/${b.budgetId}`)));
@@ -287,6 +295,10 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
       ? current.map(i => i.id === ingredient.id ? ingredient : i)
       : [...current, ingredient];
     await api.put('/families/me', { customIngredients: updated });
+    set(state => ({
+      customIngredients: updated,
+      family: state.family ? { ...state.family, customIngredients: updated } : null,
+    }));
   },
 
   deleteCustomIngredient: async (_familyId, ingId) => {
@@ -294,6 +306,10 @@ export const useFamilyStore = create<FamilyState>((set, get) => ({
     if (!family) return;
     const updated = (family.customIngredients || []).filter(i => i.id !== ingId);
     await api.put('/families/me', { customIngredients: updated });
+    set(state => ({
+      customIngredients: updated,
+      family: state.family ? { ...state.family, customIngredients: updated } : null,
+    }));
     if (availableIngredients.includes(ingId)) {
       const newAvailable = availableIngredients.filter(id => id !== ingId);
       await api.put('/families/me/settings/ingredients', { availableIngredients: newAvailable });

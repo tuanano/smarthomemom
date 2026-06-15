@@ -4,8 +4,15 @@ import type { Timestamp } from 'firebase/firestore';
 export type FirestoreDate = Timestamp | Date;
 
 /** Convert FirestoreDate → JS Date an toàn */
-export function toDate(val: FirestoreDate): Date {
-  return val instanceof Date ? val : val.toDate();
+export function toDate(val: FirestoreDate | string | null | undefined): Date {
+  if (!val) return new Date();
+  if (val instanceof Date) return val;
+  if (typeof val === 'string') return new Date(val);
+  if (typeof (val as any).toDate === 'function') return (val as any).toDate();
+  // plain serialized Timestamp: { seconds, nanoseconds }
+  const s = (val as unknown as { seconds?: number }).seconds;
+  if (typeof s === 'number') return new Date(s * 1000);
+  return new Date();
 }
 
 export interface FamilyMember {

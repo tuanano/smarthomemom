@@ -4,8 +4,11 @@ const BASE_URL = import.meta.env.VITE_API_URL || 'https://smarthomemombe.onrende
 
 function toISO(date: any): string | undefined {
   if (!date) return undefined;
-  if (date instanceof Date) return date.toISOString();
+  if (date instanceof Date) {
+    return isNaN(date.getTime()) ? undefined : date.toISOString();
+  }
   if (typeof date.toDate === 'function') return date.toDate().toISOString();
+  if (typeof date === 'string') return date;
   return String(date);
 }
 
